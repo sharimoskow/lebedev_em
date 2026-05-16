@@ -1,5 +1,7 @@
 # lebedev_em
 
+Status BETA: This is a research code in active development. Use with appropriate caution.
+
 A Python implementation of the Lebedev staggered-grid finite-difference scheme
 for 3-D electromagnetic logging simulation in anisotropic media, as described in:
 
