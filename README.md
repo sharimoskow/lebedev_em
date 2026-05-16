@@ -90,8 +90,6 @@ python examples/run_sigma_func_ddh03.py
 python examples/compare_media_crossing.py
 ```
 
-The key output is the zero-crossing depth of Im(Bxx) − Im(Bxz) on the tool axis,
-which characterises the formation boundary detection capability.
 
 ---
 
