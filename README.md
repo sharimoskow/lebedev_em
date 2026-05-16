@@ -114,6 +114,8 @@ python examples/compare_media_crossing.py
 | `from_geometry_func(grid, sigma_func, interface_func, ...)` | σ + analytical normals via `GeometryStack` |
 | `from_fine_grid(grid, fine_grid, fine_media)` | Coarsen from reference |
 
+All `sigma_func`-based builders accept both scalar (isotropic) and 3×3 tensor (anisotropic) conductivity values, enabling full tilted transverse isotropy (TTI) and general anisotropy.
+
 ### Geometry
 
 | Class | Description |
