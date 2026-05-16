@@ -163,9 +163,9 @@ MIT License. See `pyproject.toml` for details.
 This implementation was developed with the assistance of Claude (Anthropic), including the design and debugging of the sub-cell homogenization routines (from_geometry_func, sequential Backus averaging) and the GeometryStack interface.
 
 
-## Citation
+## References
 
-If you use this code in your research, please cite the original paper:
+**Core algorithm** — please cite if you use this code:
 
 ```
 Davydycheva, S., Druskin, V., & Habashy, T. (2003).
@@ -173,4 +173,23 @@ An efficient finite-difference scheme for electromagnetic logging
 in 3D anisotropic inhomogeneous media.
 Geophysics, 68(5), 1525–1536.
 https://doi.org/10.1190/1.1620626
+```
+
+**Optimal geometric grids** — the theoretical basis for the fast convergence
+in x and y with small k:
+
+```
+Druskin, V., & Knizhnerman, L. (1999).
+Gaussian spectral rules for the three-point second differences:
+I. A two-point positive definite problem in a semi-infinite domain.
+SIAM Journal on Numerical Analysis, 37(2), 403–422.
+```
+
+**Nodal homogenisation** — the sub-cell conductivity averaging scheme:
+
+```
+Moskow, S., Druskin, V., Habashy, T., Lee, P., & Davydycheva, S. (1999).
+A finite difference scheme for elliptic equations with rough coefficients
+using a Cartesian grid nonconforming to interfaces.
+SIAM Journal on Numerical Analysis, 36(2), 442–464.
 ```
