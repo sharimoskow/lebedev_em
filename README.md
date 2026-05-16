@@ -156,6 +156,10 @@ the whole-space magnetic dipole analytic solution.
 MIT License. See `pyproject.toml` for details.
 
 ---
+## Development
+
+This implementation was developed with the assistance of Claude (Anthropic), including the design and debugging of the sub-cell homogenization routines (from_geometry_func, sequential Backus averaging) and the GeometryStack interface.
+
 
 ## Citation
 
