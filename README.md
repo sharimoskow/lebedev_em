@@ -101,7 +101,7 @@ python examples/compare_media_crossing.py
 |---|---|
 | `uniform_grid(Mx, My, Mz, hx, hy, hz)` | Uniform spacing |
 | `symmetric_uniform_grid(Mx, My, Mz, Lx, Ly, Lz)` | Symmetric uniform |
-| `optimal_geometric_1d(L, hmin, ratio)` | Geometric stretching toward PML |
+| `optimal_geometric_1d(L, hmin, ratio)` | Optimal grid geometric stretching |
 | `LebedevGrid3D` | Core grid class |
 
 ### Media builders
