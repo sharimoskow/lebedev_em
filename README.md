@@ -7,7 +7,7 @@ for 3-D electromagnetic logging simulation in anisotropic media, as described in
 > *An efficient finite-difference scheme for electromagnetic logging in 3D anisotropic inhomogeneous media.*
 > **Geophysics**, 68(5), 1525–1536.
 
-The scheme uses a non-orthogonal staggered Lebedev grid that naturally
+The scheme uses a staggered Lebedev grid that naturally
 accommodates full anisotropic conductivity tensors, making it well-suited for
 deviated-well scenarios with dipping anisotropic formations.
 
@@ -17,7 +17,7 @@ deviated-well scenarios with dipping anisotropic formations.
 
 - **Lebedev staggered-grid** FD discretisation of Maxwell's equations at a
   single frequency (time-harmonic, magnetic dipole source)
-- **Flexible media builders** — specify conductivity from a scalar function,
+- **Flexible media builders** — specify conductivity from a callable function,
   fine reference grid, or analytical geometry (bore / invasion / formation
   boundaries), with automatic sub-cell homogenisation via sequential Backus
   averaging
