@@ -19,6 +19,11 @@ deviated-well scenarios with dipping anisotropic formations.
 
 - **Lebedev staggered-grid** FD discretisation of Maxwell's equations at a
   single frequency (time-harmonic, magnetic dipole source)
+- **Optimal geometric grids** (Druskin & Knizhnerman 1999) — geometrically
+  stretched grids in the transverse (x, y) directions achieve exponential
+  convergence, keeping 3-D system sizes tractable: k=4 (18K unknowns) gives
+  results within the DDH03 reference band that would otherwise require a
+  uniform grid orders of magnitude larger
 - **Flexible media builders** — specify conductivity from a callable function,
   fine reference grid, or analytical geometry (bore / invasion / formation
   boundaries), with automatic sub-cell homogenisation via sequential Backus
