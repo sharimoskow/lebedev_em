@@ -186,6 +186,11 @@ Druskin, V., & Knizhnerman, L. (1999).
 Gaussian spectral rules for the three-point second differences:
 I. A two-point positive definite problem in a semi-infinite domain.
 SIAM Journal on Numerical Analysis, 37(2), 403–422.
+
+Ingerman, D., Druskin, V., & Knizhnerman, L. (2000).
+Optimal finite difference grids and rational approximations of the square root
+I. Elliptic problems.
+Communications on Pure and Applied Mathematics, 53(8), 1039–1066.
 ```
 
 **Nodal homogenisation** — the sub-cell conductivity averaging scheme:
