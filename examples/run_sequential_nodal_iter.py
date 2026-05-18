@@ -1,4 +1,4 @@
-"""Strategy E run using ILU-preconditioned LGMRES — faster for k=5."""
+"""Sequential nodal homogenization run using ILU-preconditioned LGMRES — faster for k=5."""
 import sys, os, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src'))
 import numpy as np

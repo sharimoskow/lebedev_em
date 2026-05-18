@@ -1,8 +1,8 @@
 """
-plot_strategy_comparison.py  —  DDH03 strategy / k-convergence comparison
+plot_method_comparison.py  —  DDH03 method / k-convergence comparison
 H=0.10 m throughout.
 
-Reference data: hmin010_k{3,4,5}_avg.npz  (from run_k6_mc_bg.py, strategy A)
+Reference data: hmin010_k{3,4,5}_avg.npz  (pre-computed pointwise baseline)
   k=3 data starts at z=-1.663 m (Z_MIN=-1.7 clamp), crossing is at z≈-1.746 m
   → k=3 ref starts just past its own crossing; consistent with strategy A below.
 

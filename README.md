@@ -24,8 +24,8 @@ deviated-well scenarios with dipping anisotropic formations.
   convergence, keeping 3-D system sizes tractable.
 - **Flexible media builders** — specify conductivity from a callable function,
   fine reference grid, or analytical geometry (bore / invasion / formation
-  boundaries), with automatic sub-cell homogenisation via sequential Backus
-  averaging
+  boundaries), with automatic sub-cell homogenisation via sequential nodal
+  homogenization
 - **Geometry stack** — compose cylindrical, planar, and spherical boundaries
   to describe layered/invaded formations; supply analytical normals for each
   boundary to bypass numerical normal estimation
@@ -41,7 +41,7 @@ deviated-well scenarios with dipping anisotropic formations.
 Requires Python ≥ 3.10.
 
 ```bash
-git clone https://github.com/<your-username>/lebedev_em.git
+git clone https://github.com/sharimoskow/lebedev_em.git
 cd lebedev_em
 pip install -e ".[dev]"
 ```
@@ -163,7 +163,7 @@ MIT License. See `pyproject.toml` for details.
 ---
 ## Development
 
-This implementation was developed with the assistance of Claude (Anthropic), including the design and debugging of the sub-cell homogenization routines (from_geometry_func, sequential Backus averaging) and the GeometryStack interface.
+This implementation was developed with the assistance of Claude (Anthropic), including the design and debugging of the sub-cell homogenization routines (from_geometry_func, sequential nodal homogenization) and the GeometryStack interface.
 
 
 ## References

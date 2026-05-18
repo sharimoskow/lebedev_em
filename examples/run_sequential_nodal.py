@@ -1,4 +1,4 @@
-"""Run strategy E for a given k and save hmin010_k{k}_E.npz."""
+"""Run sequential nodal homogenization for a given k and save hmin010_k{k}_E.npz."""
 import sys, os, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src'))
 import numpy as np

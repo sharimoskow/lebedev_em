@@ -1,4 +1,4 @@
-"""Strategy E with H_MIN=0.095 m for a given k.  Usage: python run_strat_E_h095.py [k]"""
+"""Sequential nodal homogenization with H_MIN=0.095 m for a given k.  Usage: python run_sequential_nodal_h095.py [k]"""
 import sys, os, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src'))
 import numpy as np

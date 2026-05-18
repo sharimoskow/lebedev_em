@@ -1,5 +1,5 @@
 """
-plot_stratE_clean.py — Strategy E, k=3–6, no crossing lines, no DDH03 band.
+plot_sequential_nodal.py — Sequential nodal homogenization, k=3–6, no crossing lines, no DDH03 band.
 
 Data files:
   k=3: hmin0166_k3_E.npz  (magic h_min = 0.166 m = R_INV/alpha)
