@@ -1,0 +1,858 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1.1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{bm}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{booktabs}
+
+\newtheorem{lemma}{Lemma}
+\newtheorem{remark}{Remark}
+
+\newcommand{\nn}{\hat{\bm{n}}}
+\newcommand{\mm}{\hat{\bm{m}}}
+\newcommand{\qq}{\hat{\bm{q}}}
+\newcommand{\ee}[1]{\hat{\bm{e}}_{#1}}
+\newcommand{\tL}{\widetilde{L}}
+\newcommand{\SD}{\Sigma_D}
+\newcommand{\SL}{\Sigma_L}
+\newcommand{\sbar}{\bar{\sigma}}
+\newcommand{\stilde}{\widetilde{\sigma}}
+\newcommand{\invs}{\langle\sigma^{-1}\rangle_{\mathrm{vol}}}
+\newcommand{\tvnabla}{\widetilde{\nabla}}
+% --- anisotropic extension ---
+\newcommand{\snn}[1]{\sigma_{nn}^{(#1)}}
+\newcommand{\smn}[1]{\sigma_{mn}^{(#1)}}
+\newcommand{\sqn}[1]{\sigma_{qn}^{(#1)}}
+\newcommand{\Sc}[1]{S^{(#1)}}
+\newcommand{\GTT}{G_{TT}}
+\newcommand{\Gnn}{G_{nn}}
+\newcommand{\rhom}{\bm{\rho}_m}
+\newcommand{\rhoq}{\bm{\rho}_q}
+\newcommand{\Done}{\bm{D}_1}
+
+\title{Three-Dimensional Nodal Homogenization for\\
+       Arbitrarily Oriented and Multi-Interface Layered Media}
+\author{S.\ Moskow}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We derive the nodal homogenization tensor $\SD$ for a layered medium
+with planar symmetry direction $\nn$ at arbitrary orientation, and describe
+its implementation for Cartesian finite-difference grids.
+Both the isotropic and fully anisotropic cases are treated within the same
+energy-matching framework of Moskow et al.\ (1999), extended to three spatial
+dimensions.  In both cases the result takes the form
+$\SD = \tL^{-\top} G\,\tL^{-1}$,
+where $\tL$ encodes the discrete gradient of the local solution space and $G$
+is an energy matrix built from volume averages of the medium.
+For an isotropic profile the ingredients are
+$\tL = [\mm\mid\qq\mid D\nn]$, with $D$ a diagonal matrix of per-axis line
+averages of $\sigma^{-1}$, and $G = \operatorname{diag}(\sbar,\sbar,\invs)$.
+For a tensor-valued profile, the columns of $\tL$ acquire off-diagonal
+corrections from the off-normal conductivity components, and the upper-left
+block of $G$ is replaced by the volume average of the pointwise Schur
+complement while $G_{33}$ becomes the volume average of $1/\sigma_{nn}$.
+
+Two practical computational paths are described.  When the interface geometry
+is known analytically, $\nn$ is supplied exactly and averages are read from
+geometric fractions.  When only a conductivity callable is available, $\nn$
+is estimated by fitting a plane to interface-crossing voxel midpoints on a
+fine sub-grid (geometric SVD); a planarity ratio detects unreliable estimates
+and triggers a diagonal fallback.  For tensor-valued callables the SVD uses
+$\tfrac{1}{3}\mathrm{tr}\,\sigma$ as a scalar proxy.
+
+Dual cells straddling two interfaces are handled by a sequential application
+of the nodal formula: the two outer materials are homogenized first with the
+outer boundary normal, then the result is homogenized against the sandwiched
+inner material (identified by its median conductivity) with the inner boundary
+normal.  A fallback to single-interface treatment is applied when the
+intermediate tensor has eigenvalues outside the physical conductivity range.
+\end{abstract}
+
+\section{Setup}
+
+Let $H = [x_1^-,x_1^+]\times[x_2^-,x_2^+]\times[x_3^-,x_3^+]$ be a rectangular
+dual cell (node-centered box) on a Cartesian grid with grid axes
+$\ee{1},\ee{2},\ee{3}$.  We consider an isotropic medium whose conductivity
+varies only along a fixed direction $\nn$:
+\begin{equation}\label{eq:layered}
+    \sigma(\bm{x}) = \sigma(\nn\cdot\bm{x}),
+\end{equation}
+where $\nn$ is a unit vector at arbitrary orientation and $\sigma:\mathbb{R}\to\mathbb{R}_{>0}$
+is any measurable, bounded, and bounded-away-from-zero function.  This
+encompasses any number of planar layers (not just one interface), as well as
+continuously varying profiles.
+
+Let $\mm$ and $\qq$ be unit vectors orthogonal to $\nn$ and to each other, so
+that $\{\mm,\qq,\nn\}$ is an orthonormal basis.
+
+\section{Local Solution Space}
+
+Following Moskow et al.\ (1999), we approximate the electric potential locally
+by functions whose gradient satisfies the interface transmission conditions
+exactly at every level set of $\nn\cdot\bm{x}$: the tangential electric field
+and the normal current density are both constant in the $\nn$ direction.
+This motivates the local solution space
+\[
+    L(H) = \operatorname{span}\bigl\{1,\;\mm\cdot\bm{x},\;\qq\cdot\bm{x},\;\varphi_n(\bm{x})\bigr\},
+\]
+where
+\[
+    \varphi_n(\bm{x}) = \int_0^{\nn\cdot\bm{x}} \frac{dt}{\sigma(t)}
+\]
+is the ``normal potential,'' which carries all the variability of $\sigma$
+across layers.  Note that $\varphi_n$ is well-defined for any $\sigma$
+satisfying \eqref{eq:layered}, regardless of the number of layers or
+smoothness of the profile.
+
+\section{True and Discrete Gradients}
+
+\paragraph{True gradient.}
+For $\phi\in L(H)$ with coefficient vector $\bm{a}=(a_1,a_2,a_3)^\top$,
+\[
+    \phi(\bm{x}) = a_1(\mm\cdot\bm{x}) + a_2(\qq\cdot\bm{x}) + a_3\,\varphi_n(\bm{x}),
+\]
+the true gradient is
+\begin{equation}\label{eq:true_grad}
+    \nabla\phi = a_1\,\mm + a_2\,\qq + \frac{a_3}{\sigma(\nn\cdot\bm{x})}\,\nn.
+\end{equation}
+The three coefficients have clear physical meaning: $a_1$ and $a_2$ are the
+(constant) tangential electric field components, and $a_3$ is the (constant)
+normal current density $J_n = \sigma E_n$.
+
+\paragraph{Discrete gradient.}
+The finite-difference approximation to the $k$-th component of $\nabla\phi$
+along grid axis $\ee{k}$ is the average of $\partial\phi/\partial x_k$ across
+the corresponding edge.  Since $\phi = a_1(\mm\cdot\bm{x}) + a_2(\qq\cdot\bm{x})
++ a_3\varphi_n$ and the tangential terms contribute constants $a_1 \hat{m}_k$
+and $a_2 \hat{q}_k$, only the normal potential needs care:
+\[
+    \frac{1}{\Delta x_k}\int_{x_k^-}^{x_k^+}
+    \frac{\partial\varphi_n}{\partial x_k}\,dx_k
+    = \hat{n}_k \cdot \frac{1}{\Delta x_k}\int_{x_k^-}^{x_k^+}
+    \frac{dx_k}{\sigma(\nn\cdot\bm{x})}\Bigr|_{\text{other coords fixed}}
+    = \hat{n}_k\, d_k,
+\]
+where
+\begin{equation}\label{eq:dk}
+    d_k = \left\langle\sigma^{-1}\right\rangle_k
+    \;:=\;
+    \frac{1}{\Delta x_k}\int_{x_k^-}^{x_k^+}
+    \frac{dx_k}{\sigma(\nn\cdot\bm{x})}\Bigr|_{\text{other coords at node}}
+\end{equation}
+is the line average of $\sigma^{-1}$ along axis $\ee{k}$ through the node.
+This integral is taken at fixed coordinates perpendicular to $\ee{k}$ and
+is well-defined for any profile $\sigma(\nn\cdot\bm{x})$.  In the special
+case of $M$ planar layers with conductivities $\sigma_1,\ldots,\sigma_M$ and
+fractional lengths $f_k^{(j)}$ along edge $k$, it reduces to
+$d_k = \sum_j f_k^{(j)}/\sigma_j$.
+
+Assembling all three components, the discrete gradient is
+\begin{equation}\label{eq:disc_grad}
+    \tvnabla\phi = a_1\,\mm + a_2\,\qq + a_3\,D\nn,
+    \qquad D = \operatorname{diag}(d_1,d_2,d_3),
+\end{equation}
+or in matrix form
+\[
+    \tvnabla\phi = \tL\,\bm{a},
+    \qquad \tL := \bigl[\mm\;\big|\;\qq\;\big|\;D\nn\bigr] \in \mathbb{R}^{3\times 3},
+\]
+where the columns of $\tL$ are $\mm$, $\qq$, and $D\nn$.
+
+\section{Energy Matching Condition}\label{sec:energy_matching}
+
+We seek an effective tensor $\SD$ such that, for every $\phi,\psi\in L(H)$,
+\begin{equation}\label{eq:energy_match}
+    |H|\;\tvnabla\phi\cdot\SD\,\tvnabla\psi
+    \;=\;
+    \int_H \nabla\phi\cdot\sigma\,\nabla\psi\;dV.
+\end{equation}
+
+\paragraph{Right-hand side.}
+Using \eqref{eq:true_grad} and the orthonormality of $\{\mm,\qq,\nn\}$,
+\begin{align*}
+    \nabla\phi\cdot\sigma\nabla\psi
+    &= \sigma\Bigl(a_1 b_1 + a_2 b_2\Bigr)
+     + \frac{a_3 b_3}{\sigma},
+\end{align*}
+so
+\[
+    \int_H \nabla\phi\cdot\sigma\nabla\psi\;dV
+    = |H|\bigl(\sbar\,(a_1 b_1+a_2 b_2) + \invs\, a_3 b_3\bigr)
+    = |H|\;\bm{a}^\top G\,\bm{b},
+\]
+where
+\begin{equation}\label{eq:G}
+    G = \operatorname{diag}\!\bigl(\sbar,\;\sbar,\;\invs\bigr),
+\end{equation}
+with
+\[
+    \sbar = \langle\sigma\rangle_{\mathrm{vol}} := \frac{1}{|H|}\int_H \sigma(\nn\cdot\bm{x})\,dV,
+    \qquad
+    \invs = \langle\sigma^{-1}\rangle_{\mathrm{vol}} := \frac{1}{|H|}\int_H \frac{dV}{\sigma(\nn\cdot\bm{x})},
+\]
+the volume averages of $\sigma$ and $\sigma^{-1}$ over $H$, respectively.
+Both are well-defined for any measurable bounded profile \eqref{eq:layered}.
+Note that $\invs = 1/\stilde$, where $\stilde = (\invs)^{-1}$ is the harmonic
+mean of $\sigma$.  The key observation is that $G_{33} = \invs$ is the
+\emph{arithmetic} mean of the resistivity---not the harmonic mean of
+$\sigma$---a distinction that is critical when $D\nn \not\propto \nn$.
+
+\paragraph{Left-hand side.}
+With $\tvnabla\phi = \tL\bm{a}$ and $\tvnabla\psi = \tL\bm{b}$,
+\[
+    |H|\;\tvnabla\phi\cdot\SD\,\tvnabla\psi
+    = |H|\;\bm{a}^\top\tL^\top\SD\,\tL\,\bm{b}.
+\]
+
+\paragraph{Condition.}
+Equating both sides for all $\bm{a},\bm{b}$ gives
+\[
+    \tL^\top\SD\,\tL = G,
+\]
+and solving for $\SD$:
+\begin{equation}\label{eq:SigmaD}
+    \boxed{
+    \SD = \tL^{-\top}\,G\,\tL^{-1},
+    \qquad
+    \tL = [\mm\mid\qq\mid D\nn],
+    \qquad
+    G = \operatorname{diag}\!\bigl(\sbar,\;\sbar,\;\invs\bigr).
+    }
+\end{equation}
+Here $\tL^{-\top} := (\tL^\top)^{-1} = (\tL^{-1})^\top$.
+
+\section{Verification and Special Cases}
+
+\begin{lemma}[Axis-aligned interface]\label{lem:axis}
+For $\nn = \ee{3}$, the formula \eqref{eq:SigmaD} reduces to the standard
+arithmetic/harmonic tensor
+\[
+    \SD = \operatorname{diag}(\sbar,\;\sbar,\;\stilde).
+\]
+\end{lemma}
+\begin{proof}
+Choose $\mm=\ee{1}$, $\qq=\ee{2}$.  Then $D\nn = d_3\ee{3}$ and
+$\tL = \operatorname{diag}(1,1,d_3)$.  Since $\nn = \ee{3}$, lines along
+$\ee{1}$ and $\ee{2}$ are parallel to all level sets of $\sigma$, so
+$d_1 = d_2 = \langle\sigma^{-1}\rangle_1 = \langle\sigma^{-1}\rangle_2$
+each equal the pointwise value $\sigma(\bm{x}_{\mathrm{node}})^{-1}$ (no
+variation along those edges).  The $\ee{3}$ edge varies through the full
+profile, giving $d_3 = \langle\sigma^{-1}\rangle_z = \invs = 1/\stilde$
+(the line average along $z$ equals the volume average when the profile
+depends only on $z$).  Therefore
+\[
+    \tL^{-1} = \operatorname{diag}(1,1,1/d_3) = \operatorname{diag}(1,1,\stilde),
+\]
+and
+\[
+    \SD = \operatorname{diag}(1,1,\stilde)\cdot
+          \operatorname{diag}(\sbar,\sbar,1/\stilde)\cdot
+          \operatorname{diag}(1,1,\stilde)
+        = \operatorname{diag}(\sbar,\;\sbar,\;\stilde).\qedhere
+\]
+\end{proof}
+
+\begin{lemma}[Symmetric straddling]\label{lem:sym}
+If $D\nn$ is parallel to $\nn$ (i.e.\ $D = d\,I$ for some scalar $d$), then
+$\SD = \SL := \sbar(I - \nn\nn^\top) + \stilde\,\nn\nn^\top$.
+\end{lemma}
+\begin{proof}
+When $D\nn = d\,\nn$ the columns of $\tL$ are $\mm$, $\qq$, $d\nn$---an
+orthogonal set with squared norms $1,1,d^2$.  Hence
+$\tL^{-1}$ has rows $\mm^\top$, $\qq^\top$, $\nn^\top/d$, giving
+$\tL^{-\top} = [\mm\mid\qq\mid\nn/d]$.  Then
+\begin{align*}
+    \SD &= [\mm\mid\qq\mid\nn/d]\,\operatorname{diag}(\sbar,\sbar,1/\stilde)
+           \begin{pmatrix}\mm^\top\\\qq^\top\\\nn^\top/d\end{pmatrix}
+    \\
+    &= \sbar\,\mm\mm^\top + \sbar\,\qq\qq^\top + \frac{1}{\stilde d^2}\,\nn\nn^\top.
+\end{align*}
+Since $d = \invs^{1/1} = 1/\stilde$ (the line average equals the volume average
+when $D\propto I$), the last coefficient equals $\stilde$, and
+$\mm\mm^\top + \qq\qq^\top = I - \nn\nn^\top$, giving $\SD = \SL$.
+\end{proof}
+
+\begin{remark}
+Lemma~\ref{lem:sym} shows that the nodal correction is zero for any node at
+which $D\nn\propto\nn$---equivalently, when $d_x\hat{n}_x : d_z\hat{n}_z$ is
+constant along the direction of $\nn$.  For a tilted interface
+$\nn=[1,0,1]/\sqrt{2}$, this occurs when $d_x = d_z$, i.e.\ when the edge
+fractions in the $x$- and $z$-directions are equal.  The correction is
+non-trivial only for nodes where the interface cuts those edges asymmetrically.
+\end{remark}
+
+\section{Relation to the Two-Dimensional Formula}
+
+Moskow et al.\ (1999) derive, for the two-dimensional isotropic case with
+normal $\nn$ and single tangential $\mm$, the tensor
+\[
+    \SD^{(2)} = K\,\SL^{(2)}\,K^\top,\qquad K = L^{-1},
+\]
+where $L$ is a $2\times2$ matrix (their eq.~(A.21)) and
+$\SL^{(2)} = \operatorname{diag}(\sbar,\stilde)$ in the $(\mm,\nn)$ basis.
+
+In 3D the same energy-matching argument gives an identical structure.  The
+difference is that in 3D there are \emph{two} tangential directions, each
+contributing an $\sbar$ term to the diagonal of $G$.  Writing $\SL$ for the
+standard $3\times3$ arithmetic/harmonic tensor and noting that
+$G = \tL^\top\SL\,\tL$ holds only when $\tL$ is orthogonal (i.e.\ $D\nn \propto
+\nn$), one sees that the 3D formula \eqref{eq:SigmaD} is not generally equivalent
+to $K\SL K^\top$ with $K=\tL^{-1}$---it is the direct energy-matching result,
+which happens to coincide with $K\SL K^\top$ only in the symmetric case.
+
+% ============================================================
+\section{Anisotropic Extension}\label{sec:anisotropic}
+% ============================================================
+
+We now extend the derivation to the case where the conductivity varies along
+$\nn$ as a \emph{tensor-valued} profile: $\sigma = \sigma(\nn\cdot\bm{x})$,
+where for each $t\in\mathbb{R}$ the value $\sigma(t)$ is a symmetric
+positive-definite matrix.  This includes any number of planar layers as well
+as continuously varying anisotropy.  We write
+\[
+  \sigma_{mn}(t) := \mm^\top\!\sigma(t)\nn,
+  \quad
+  \sigma_{qn}(t) := \qq^\top\!\sigma(t)\nn,
+  \quad
+  \sigma_{nn}(t) := \nn^\top\!\sigma(t)\nn > 0,
+\]
+and use $t = \nn\cdot\bm{x}$ as the layering coordinate.
+
+This section follows the same structure as Appendix~A of Moskow et al.\
+(1999), extended from 2D to 3D by the second tangential direction $\qq$.
+
+\subsection*{A.1\quad Interface constants}
+
+For any layered anisotropic medium of the form $\sigma(\nn\cdot\bm{x})$,
+the interface transmission conditions at every level set $\{\nn\cdot\bm{x}=t\}$
+are continuity of the tangential electric field and of the normal current density.
+These motivate three constants that are uniform across all layers:
+\begin{align}
+  c_1 &:= \mm\cdot\nabla u \quad \text{(tangential field, $\mm$ direction)},
+  \label{eq:A1}\\
+  c_2 &:= \qq\cdot\nabla u \quad \text{(tangential field, $\qq$ direction)},
+  \label{eq:A2}\\
+  c_3 &:= \nn\cdot(\sigma\nabla u) \quad \text{(normal current density $J_n$)}.
+  \label{eq:A3}
+\end{align}
+
+\subsection*{A.2\quad Electric field at each level}
+
+At each level $t$, the condition $c_3 = \sigma_{mn}(t)c_1 + \sigma_{qn}(t)c_2
++ \sigma_{nn}(t)E_n$ determines the normal field:
+\begin{equation}\label{eq:A4}
+  E_n(t) \;=\; \frac{c_3 - \sigma_{mn}(t)\,c_1 - \sigma_{qn}(t)\,c_2}{\sigma_{nn}(t)}.
+\end{equation}
+The full gradient at level $t$ is therefore
+\begin{equation}\label{eq:A5}
+  \nabla u\big|_{t}
+  \;=\; c_1\,\mm \;+\; c_2\,\qq \;+\; E_n(t)\,\nn,
+\end{equation}
+and the triple $(c_1,c_2,c_3)$ completely characterizes the local potential.
+
+\subsection*{A.3\quad Discrete gradient}
+
+The finite-difference approximation to $(\nabla u)_k$ along grid axis $k$
+averages \eqref{eq:A5} over the corresponding edge at fixed transverse
+coordinates.  Because $c_1,c_2$ are constant, only $E_n(t)$ varies along
+the edge.  Substituting \eqref{eq:A4} and collecting terms in $c_1,c_2,c_3$:
+\begin{equation}\label{eq:A7}
+  (\tvnabla u)_k
+  \;=\; c_1\!\left(\hat{m}_k - \hat{n}_k\,[D_2]_{kk}\right)
+      + c_2\!\left(\hat{q}_k - \hat{n}_k\,[D_3]_{kk}\right)
+      + c_3\,\hat{n}_k\,[D_1]_{kk},
+\end{equation}
+where the per-axis line averages are
+\begin{align}
+  [D_1]_{kk} &\;:=\;
+    \frac{1}{\Delta x_k}\int_{x_k^-}^{x_k^+}
+    \frac{dx_k}{\sigma_{nn}(\nn\cdot\bm{x})}\bigg|_{x_j = x_j^{\mathrm{node}},\,j\neq k},
+    \label{eq:A8}\\[4pt]
+  [D_2]_{kk} &\;:=\;
+    \frac{1}{\Delta x_k}\int_{x_k^-}^{x_k^+}
+    \frac{\sigma_{mn}(\nn\cdot\bm{x})}{\sigma_{nn}(\nn\cdot\bm{x})}\,dx_k\bigg|_{x_j = x_j^{\mathrm{node}},\,j\neq k},
+    \label{eq:A9}\\[4pt]
+  [D_3]_{kk} &\;:=\;
+    \frac{1}{\Delta x_k}\int_{x_k^-}^{x_k^+}
+    \frac{\sigma_{qn}(\nn\cdot\bm{x})}{\sigma_{nn}(\nn\cdot\bm{x})}\,dx_k\bigg|_{x_j = x_j^{\mathrm{node}},\,j\neq k}.
+    \label{eq:A10}
+\end{align}
+Each is a 1D integral along grid axis $k$ through the node, with the two
+transverse coordinates held fixed at their node values.  Because
+$\nn\cdot\bm{x} = \hat{n}_k x_k + \sum_{j\neq k}\hat{n}_j x_j^{\mathrm{node}}$,
+the integrand is a function of $x_k$ alone, so the integrals are
+well-defined for any measurable profile.  This is the exact anisotropic
+analogue of $d_k$ in \eqref{eq:dk}.  Thus $D_1$ is the per-axis line
+average of $1/\sigma_{nn}$; $D_2$ and $D_3$ are the line averages of the
+ratios $\sigma_{mn}/\sigma_{nn}$ and $\sigma_{qn}/\sigma_{nn}$.
+Assembling all three Cartesian components:
+\begin{equation}\label{eq:A11}
+  \tvnabla u \;=\; \tL\,\bm{c},
+  \qquad
+  \tL \;:=\; \bigl[\,\mm - D_2\nn \;\big|\; \qq - D_3\nn \;\big|\; D_1\nn\,\bigr],
+  \qquad
+  \bm{c} = (c_1, c_2, c_3)^\top,
+\end{equation}
+where $D_j\nn$ denotes the vector with $k$-th entry $[D_j]_{kk}\hat{n}_k$.
+
+\begin{remark}[2D reduction]
+In 2D with a single tangential direction $\mm$, there is no $c_2$ or $D_3$,
+and $D_2$ reduces to the $2\times 2$ diagonal matrix of line averages of
+$\sigma_{mn}/\sigma_{nn}$.  Then $\tL = [\mm - D_2\nn \mid D_1\nn]$, matching
+eq.~(A.8) of Moskow et al.\ (1999).
+\end{remark}
+
+\subsection*{A.4\quad Pointwise Schur complement and energy decomposition}
+
+At each level $t$, define the \emph{pointwise Schur complement} of $\sigma(t)$
+with respect to $\nn$:
+\begin{equation}\label{eq:A12}
+  S(t) \;:=\; \sigma(t)
+  \;-\; \frac{(\sigma(t)\nn)\,(\nn^\top\!\sigma(t))}{\sigma_{nn}(t)}.
+\end{equation}
+$S(t)$ is symmetric positive-semidefinite with null vector $\nn$ for every $t$.
+Substituting \eqref{eq:A4}--\eqref{eq:A5} into the pointwise energy density
+and using the symmetry of $\sigma(t)$, the normal-tangential cross-terms
+cancel and one obtains the clean factorization
+\begin{equation}\label{eq:A13}
+  \nabla u\cdot\sigma(t)\nabla u
+  \;=\; \bm{\xi}^\top\!\bigl(\mm\;\qq\bigr)^\top\!S(t)\bigl(\mm\;\qq\bigr)\bm{\xi}
+  \;+\; \frac{c_3^2}{\sigma_{nn}(t)},
+  \qquad \bm{\xi} = (c_1,c_2)^\top.
+\end{equation}
+The tangential and normal contributions are \emph{decoupled} pointwise.
+Integrating over $H$:
+\begin{equation}\label{eq:A15}
+  \frac{1}{|H|}\int_H \nabla u\cdot\sigma\nabla u\;dV
+  \;=\; \bm{c}^\top G\,\bm{c},
+\end{equation}
+where the $3\times 3$ energy matrix in the $(c_1,c_2,c_3)$ basis is
+\begin{equation}\label{eq:A16}
+  G \;=\;
+  \begin{pmatrix}
+    \mm^\top\!\GTT\mm & \mm^\top\!\GTT\qq & 0 \\[2pt]
+    \qq^\top\!\GTT\mm & \qq^\top\!\GTT\qq & 0 \\[2pt]
+    0 & 0 & \Gnn
+  \end{pmatrix},
+\end{equation}
+with volume averages
+\begin{equation}\label{eq:GTT_Gnn}
+  \GTT \;:=\; \frac{1}{|H|}\int_H S(\nn\cdot\bm{x})\,dV,
+  \qquad
+  \Gnn \;:=\; \frac{1}{|H|}\int_H \frac{dV}{\sigma_{nn}(\nn\cdot\bm{x})}.
+\end{equation}
+That is, $\GTT$ is the \emph{arithmetic} volume average of the pointwise
+Schur complement, and $\Gnn$ is the \emph{arithmetic} volume average of the
+normal resistivity $1/\sigma_{nn}$---the anisotropic analogue of $\invs$ in the
+isotropic case.
+The zeros in \eqref{eq:A16} follow from $S(t)\nn = 0$ for all $t$, which gives
+$\GTT\nn = 0$.
+
+\subsection*{A.5\quad Effective tensor}
+
+The energy-matching condition
+$\tL^\top\SD\,\tL = G$ (Section~\ref{sec:energy_matching}) gives
+\begin{equation}\label{eq:A17}
+  \boxed{
+  \SD \;=\; \tL^{-\top}\,G\,\tL^{-1},
+  }
+\end{equation}
+with $\tL$ and $G$ defined by \eqref{eq:A11} and \eqref{eq:A16}--\eqref{eq:GTT_Gnn}.
+Equivalently, writing $K = \tL^{-1}$,
+\begin{equation}\label{eq:A18}
+  \SD \;=\; K^\top\,G\,K,
+\end{equation}
+the exact 3D analogue of eq.~(A.14) in Moskow et al.\ (1999).  All
+ingredients ($D_1,D_2,D_3$ and the averages $\GTT,\Gnn$) are well-defined
+for any measurable tensor-valued profile $\sigma(\nn\cdot\bm{x})$.
+
+\begin{remark}[Piecewise-constant reduction]
+For a two-layer medium with $\sigma^{(1)},\sigma^{(2)}$ and volume fractions
+$f$, $1-f$ (and line fractions $f_k$, $1-f_k$), the integrals reduce to
+\begin{align*}
+  [D_1]_{kk} &= \frac{f_k}{\sigma_{nn}^{(1)}} + \frac{1-f_k}{\sigma_{nn}^{(2)}},
+  &\qquad
+  \GTT &= f\,S^{(1)} + (1-f)\,S^{(2)},\\
+  [D_2]_{kk} &= \frac{f_k\,\sigma_{mn}^{(1)}}{\sigma_{nn}^{(1)}} + \frac{(1-f_k)\,\sigma_{mn}^{(2)}}{\sigma_{nn}^{(2)}},
+  &\qquad
+  \Gnn &= \frac{f}{\sigma_{nn}^{(1)}} + \frac{1-f}{\sigma_{nn}^{(2)}},
+\end{align*}
+and similarly for $D_3$.
+\end{remark}
+
+\begin{remark}[Isotropic reduction]
+When $\sigma(t)=\sigma(t)\,I$ is scalar, $\sigma_{mn}=\sigma_{qn}=0$ so
+$D_2=D_3=0$.  Then $\tL=[\mm\mid\qq\mid D_1\nn]$ with $[D_1]_{kk}=d_k$
+the isotropic line average, recovering \eqref{eq:disc_grad}.  The Schur
+complement is $S(t)=\sigma(t)(I-\nn\nn^\top)$, giving $\GTT=\sbar(I-\nn\nn^\top)$
+and $\Gnn=\invs$, so $G=\operatorname{diag}(\sbar,\sbar,\invs)$, recovering \eqref{eq:G}.
+\end{remark}
+
+\begin{remark}[TI medium at oblique interface]
+For a transversely isotropic (TI) medium $\sigma=\sigma_T(I-\hat{\bm{t}}\hat{\bm{t}}^\top)
++\sigma_N\hat{\bm{t}}\hat{\bm{t}}^\top$ with symmetry axis $\hat{\bm{t}}$,
+and with interface normal $\nn$ not aligned with $\hat{\bm{t}}$, the
+ratios $\sigma_{mn}/\sigma_{nn}$ and $\sigma_{qn}/\sigma_{nn}$ are nonzero,
+making $D_2$ and $D_3$ nontrivial.  Omitting them leads to a $k$-dependent
+crossing position in borehole logging simulations.
+\end{remark}
+
+% ============================================================
+\section{Summary}
+
+The three-dimensional nodal homogenization tensor for a planar interface with
+unit normal $\nn$ is given by
+\[
+    \SD = \tL^{-\top}\,G\,\tL^{-1},
+\]
+with the following ingredients:
+
+\medskip
+\begin{center}
+\renewcommand{\arraystretch}{1.6}
+\begin{tabular}{lll}
+\toprule
+Quantity & Definition & Meaning \\
+\midrule
+$D$ & $\operatorname{diag}(d_1,d_2,d_3)$,\quad
+      $d_k = \dfrac{1}{\Delta x_k}\displaystyle\int_{x_k^-}^{x_k^+}
+      \dfrac{dx_k}{\sigma(\nn\cdot\bm{x})}$
+    & per-axis line avg of $\sigma^{-1}$ \\[4pt]
+$\tL$ & $[\mm\mid\qq\mid D\nn]$, \quad $\mm,\qq\perp\nn$ orthonormal & discrete-gradient map \\
+$G$ & $\operatorname{diag}(\sbar,\sbar,\invs)$ & energy matrix \\
+$\sbar$ & $\dfrac{1}{|H|}\displaystyle\int_H \sigma(\nn\cdot\bm{x})\,dV$ & vol.\ avg.\ of $\sigma$ \\[4pt]
+$\invs$ & $\dfrac{1}{|H|}\displaystyle\int_H \dfrac{dV}{\sigma(\nn\cdot\bm{x})}$ & vol.\ avg.\ of $\sigma^{-1}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\medskip\noindent
+All quantities are well-defined for any measurable profile
+$\sigma = \sigma(\nn\cdot\bm{x})$, with any number of layers or continuous
+variation.  The key point is that $G_{33} = \invs$ is the
+\emph{arithmetic mean of the resistivity} over the dual-cell volume, not
+the harmonic mean of $\sigma$.  This value arises from the integral
+$\int_H \sigma\,|E_n|^2\,dV = \int_H \sigma^{-1}\,|J_n|^2\,dV$
+when $(a_1,a_2,a_3)=(0,0,1)$.
+
+\subsection*{Anisotropic case}
+
+For a tensor-valued layered profile $\sigma = \sigma(\nn\cdot\bm{x})$, the
+same formula $\SD = \tL^{-\top}G\,\tL^{-1}$ holds with the following
+ingredients (see Section~\ref{sec:anisotropic}):
+
+\medskip
+\begin{center}
+\renewcommand{\arraystretch}{1.8}
+\begin{tabular}{lll}
+\toprule
+Quantity & Definition & Meaning \\
+\midrule
+$D_1$ & $\operatorname{diag}_k\!\left(\dfrac{1}{\Delta x_k}
+        \displaystyle\int_{x_k^-}^{x_k^+}
+        \dfrac{dx_k}{\sigma_{nn}(\nn\cdot\bm{x})}\right)$
+      & line avg of $\sigma_{nn}^{-1}$ \\[6pt]
+$D_2$ & $\operatorname{diag}_k\!\left(\dfrac{1}{\Delta x_k}
+        \displaystyle\int_{x_k^-}^{x_k^+}
+        \dfrac{\sigma_{mn}}{\sigma_{nn}}\,dx_k\right)$
+      & line avg of $\sigma_{mn}/\sigma_{nn}$ \\[6pt]
+$D_3$ & $\operatorname{diag}_k\!\left(\dfrac{1}{\Delta x_k}
+        \displaystyle\int_{x_k^-}^{x_k^+}
+        \dfrac{\sigma_{qn}}{\sigma_{nn}}\,dx_k\right)$
+      & line avg of $\sigma_{qn}/\sigma_{nn}$ \\[6pt]
+$\tL$ & $[\mm - D_2\nn \mid \qq - D_3\nn \mid D_1\nn]$
+      & discrete-gradient map \\[2pt]
+$S(t)$ & $\sigma(t) - \dfrac{(\sigma(t)\nn)(\nn^\top\!\sigma(t))}{\sigma_{nn}(t)}$
+       & pointwise Schur complement \\[6pt]
+$\GTT$ & $\dfrac{1}{|H|}\displaystyle\int_H S(\nn\cdot\bm{x})\,dV$
+       & vol.\ avg.\ of Schur complement \\[6pt]
+$\Gnn$ & $\dfrac{1}{|H|}\displaystyle\int_H \dfrac{dV}{\sigma_{nn}(\nn\cdot\bm{x})}$
+       & vol.\ avg.\ of $\sigma_{nn}^{-1}$ \\[6pt]
+$G$ & $\begin{pmatrix} \mm^\top\!\GTT\mm & \mm^\top\!\GTT\qq & 0 \\
+                       \qq^\top\!\GTT\mm & \qq^\top\!\GTT\qq & 0 \\
+                       0 & 0 & \Gnn \end{pmatrix}$
+    & energy matrix \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\medskip\noindent
+The isotropic case is recovered when $\sigma(t) = \sigma(t)I$: then
+$D_2 = D_3 = 0$, $\tL$ reduces to $[\mm\mid\qq\mid D\nn]$ with
+$D = D_1$, and $G = \operatorname{diag}(\sbar,\sbar,\invs)$.
+
+% ============================================================
+\section{Practical Application: Two Computational Paths}
+% ============================================================
+
+The derivation above assumes $\sigma$ is exactly layered with known normal
+$\nn$ inside the dual cell $H$.  In practice two situations arise, each handled
+by a distinct computational path.
+
+% ------------------------------------------------------------
+\subsection{Case 1 — Interface geometry analytically known}\label{sec:exact_n}
+% ------------------------------------------------------------
+
+When the interface is described by an explicit geometric object (e.g.\ a
+planar boundary, a cylinder, a level-set surface), the unit normal $\nn$ at
+each dual-cell node is available analytically.  The procedure is then direct:
+
+\begin{enumerate}
+\item \textbf{Evaluate material parameters.}  Evaluate $\sigma$ (scalar or
+tensor) on a fine isotropic sub-grid of spacing $h_\mathrm{sub}$ within $H$,
+using the exact interface geometry to assign the correct material to each
+sub-voxel.
+\item \textbf{Volume fractions.}  From the sub-grid masks, compute the
+volume fraction $f$ of each material in $H$ and the per-axis line fractions
+$f_k$ along the central grid-axis lines.
+\item \textbf{Line averages.}  The per-axis line averages $d_k$
+(eq.\ \eqref{eq:dk}) are read directly from $f_k$:
+\[
+  d_k \;=\; \frac{f_k}{\sigma_1} + \frac{1-f_k}{\sigma_2}.
+\]
+For the anisotropic case replace $\sigma_i$ by the appropriate components
+$\sigma_{nn}^{(i)}$, $\sigma_{mn}^{(i)}/\sigma_{nn}^{(i)}$, etc.
+\item \textbf{Volume averages.}  Compute $\sbar = f\sigma_1 + (1-f)\sigma_2$
+and $\invs = f/\sigma_1 + (1-f)/\sigma_2$ from the volume fractions.
+\item \textbf{Assemble $\SD$.}  Apply \eqref{eq:SigmaD} with the known $\nn$
+and the computed ingredients.
+\end{enumerate}
+
+No interface-direction estimation is needed; the analytic $\nn$ is used
+exactly.  This path is exact for planar interfaces and $O(h^2)$-accurate
+for curved ones (where the local planarity error over a cell of width $h$
+is $O(h^2)$).
+
+% ------------------------------------------------------------
+\subsection{Case 2 — Only $\sigma$ available as a lookup function}
+\label{sec:sigma_func}
+% ------------------------------------------------------------
+
+When $\sigma(\bm{x})$ is given only as a black-box callable (e.g.\ a
+nearest-neighbour interpolation of a fine volumetric data set), no explicit
+interface geometry is available.  The direction $\nn$ must be \emph{estimated}
+from the local variation of $\sigma$ within $H$, and the line and volume
+averages computed entirely by quadrature.
+
+\subsubsection*{Step 1 — Sub-grid evaluation}
+
+Evaluate $\sigma$ on a fine isotropic sub-grid of spacing $h_\mathrm{svd}$
+within $H$, producing a 3-D array $B_{ijk} = \sigma(\bm{x}_{ijk})$.  Equal
+spacing in all three directions is important: it eliminates sampling-induced
+bias in the SVD step below.  The same block is reused for normal estimation,
+volume averages, and line averages.
+
+\subsubsection*{Step 2 — Normal estimation by SVD}
+
+When $\sigma$ is tensor-valued, the scalar proxy $b_{ijk} = \tfrac{1}{3}\mathrm{tr}\,B_{ijk}$
+is used in place of $B_{ijk}$ for all steps below; the actual tensor values are
+retained in a parallel block for use in the homogenization integrals (Steps 3--5).
+This ensures that the interface-detection logic is insensitive to the anisotropy
+\emph{direction} and responds only to changes in conductivity \emph{magnitude}.
+
+The interface normal is estimated geometrically from the positions of
+interface-crossing voxel pairs, not from finite differences of $\sigma$.
+(A gradient-based approach is biased when the grid spacing is anisotropic:
+a 7:1 $z/x$ ratio inflates $\partial\sigma/\partial z$ by $7\times$ relative
+to $\partial\sigma/\partial x$, producing a spurious normal near $\hat{z}$.)
+
+\begin{enumerate}
+\item \textbf{Binarise.}  Set $\sigma_\mathrm{mid} = \tfrac{1}{2}(\min b + \max b)$;
+      label each sub-voxel as layer~1 ($b < \sigma_\mathrm{mid}$) or
+      layer~2 ($b \geq \sigma_\mathrm{mid}$).
+\item \textbf{Locate crossings.}  For each of the six face-adjacency directions
+      $(\pm x, \pm y, \pm z)$, flag voxel pairs whose two members belong to
+      different layers.  Record the physical midpoint of each such pair.
+      (Using the midpoint rather than a single voxel centre places each sample
+      directly on the interface and avoids a ``flooding'' bias near corners.)
+\item \textbf{Fit a plane.}  Stack the midpoint coordinates into an $N\times 3$
+      matrix $P$, remove its centroid, and compute the SVD
+      $P - \bar P = U\,S\,V^\top$.  The \emph{last} right singular vector
+      $V_{:,3}$ (minimum-variance direction of the midpoints) is the estimated
+      plane normal $\nn$.
+\item \textbf{Sign convention.}  Orient $\nn$ so that the half-space
+      $\{\bm{x}\cdot\nn > 0\}$ has higher mean conductivity.
+\end{enumerate}
+
+The confidence of the estimate is measured by the \emph{planarity ratio}
+\[
+  r = \frac{s_3}{s_1}
+\]
+(last to first singular value of $P - \bar P$).  For a perfectly planar
+interface $s_3 \approx 0$ so $r \approx 0$; for an isotropic scatter
+$r \approx 1$.  If $r \geq \tau$ (default $\tau = 0.7$) the block has no
+single dominant interface direction and the cell falls back to the diagonal
+(axis-aligned arithmetic/harmonic) formula.  Otherwise $\nn$ is accepted and
+the nodal formula \eqref{eq:SigmaD} is applied.
+
+\subsubsection*{Step 3 — Line averages by 1-D quadrature}
+
+Once $\nn$ is known, the per-axis line averages
+\[
+  d_k = \frac{1}{\Delta x_k}\int_{x_k^-}^{x_k^+} \frac{dx_k}{\sigma(\nn\cdot\bm{x})}
+\]
+(eq.\ \eqref{eq:dk}) are computed by 1-D numerical quadrature along each
+grid axis through the node centre, with $n_\mathrm{line}$ uniformly spaced
+points (default 50).  Similarly for the anisotropic integrands
+$\sigma_{mn}/\sigma_{nn}$ and $\sigma_{qn}/\sigma_{nn}$.
+
+\subsubsection*{Step 4 — Volume averages by 3-D quadrature}
+
+The volume averages
+$\sbar = \langle\sigma\rangle_\mathrm{vol}$ and
+$\invs = \langle\sigma^{-1}\rangle_\mathrm{vol}$
+are computed from the same isotropic SVD sub-grid (which already provides
+a fine, uniform sample of $H$) rather than a separate coarser $n_\mathrm{vol}^3$
+grid, making them more accurate for thin-sliver cells.
+
+\subsubsection*{Step 5 — Assemble $\SD$}
+
+With the estimated $\nn$ and numerically computed $D = \operatorname{diag}(d_1,d_2,d_3)$,
+$\sbar$, $\invs$, apply \eqref{eq:SigmaD}.  Cells for which the SVD
+confidence is low ($r \geq \tau$) or for which $H$ contains no interface
+(uniform block) receive the diagonal tensor
+$\SD = \operatorname{diag}(\sigma_{xx}^{\mathrm{eff}}, \sigma_{yy}^{\mathrm{eff}}, \sigma_{zz}^{\mathrm{eff}})$
+from axis-wise harmonic averaging.
+
+\begin{remark}
+The lookup-function path is fully matrix-free: it calls $\sigma(\bm{x})$
+on demand at whatever resolution is required for each dual cell, without
+storing a global fine-grid array.  For a piecewise-constant closure the
+total evaluation count per node is approximately $n_\mathrm{svd}^3 + 3\,n_\mathrm{line}$,
+where $n_\mathrm{svd} = \lceil \Delta x / h_\mathrm{svd}\rceil \times \cdots$.
+\end{remark}
+
+% ============================================================
+\section{Multi-Interface Cells: Sequential Backus}\label{sec:multilayer}
+% ============================================================
+
+In practical geometries a dual cell may straddle \emph{two or more} planar
+(or approximately planar) interfaces simultaneously.  A common example in
+borehole logging is a cell that contains three distinct materials:
+borehole fluid (conductivity $\sigma_b$), invasion zone ($\sigma_i$), and
+undisturbed formation ($\sigma_f$), separated by the borehole wall
+(inner boundary, normal $\nn_\mathrm{in}$) and the invasion front
+(outer boundary, normal $\nn_\mathrm{out}$).  A single interface normal
+cannot represent both boundaries at once.
+
+\subsection*{Multi-material identification (lookup-function path)}
+
+A cell is classified as multi-material during the same pass that computes the
+SVD normal estimate (\S\ref{sec:sigma_func}).  The isotropic SVD sub-grid block
+$B_{ijk}$ (already evaluated for normal estimation) is rounded to six significant
+figures and its unique conductivity levels are extracted:
+\[
+  \{\sigma^{(1)} < \sigma^{(2)} < \cdots < \sigma^{(M)}\}
+  \;=\; \mathrm{unique}\!\left(\mathrm{round}(B_{ijk},\,6)\right).
+\]
+If $M \geq 3$ the cell is flagged as multi-material and the procedure below is
+applied.  The rounding tolerance (six decimal places) groups physically identical
+conductivities that may differ by floating-point noise without merging genuinely
+distinct materials whose conductivities differ by more than $10^{-6}$.
+
+\medskip
+\noindent\textbf{Determining interface structure via per-pair sub-SVDs.}
+For each of the three pairs of adjacent conductivity levels,
+$(0,1)$, $(1,2)$, and the \emph{skip pair} $(0,2)$, a masked sub-SVD is
+performed on the voxels belonging to that pair, using an adaptive tolerance
+$\delta_{ij} = 0.4 \times \min(\text{gap to nearest other level})$ to define
+the masks.  Each sub-SVD returns an estimated normal $\hat{n}_{ij}$ and a
+planarity ratio $r_{ij}$; a pair is \emph{resolved} if $r_{ij} < \tau$
+(same threshold $\tau = 0.7$ as the single-interface case).
+
+The resolved normals determine the cell structure:
+\begin{itemize}
+\item \textbf{All interfaces parallel}
+      ($|\hat{n}_{01}\cdot\hat{n}_{12}| > 0.90$ and
+       $|\hat{n}_{01}\cdot\hat{n}_{02}| > 0.90$):
+      the three materials are co-planar strata sharing a single normal
+      direction.  The nodal formula \eqref{eq:SigmaD} is applied once to all
+      three materials simultaneously via a direct multi-region extension
+      (\emph{multiregion nodal}), using the average of the resolved normals.
+\item \textbf{Adjacent pairs parallel, skip pair distinct}
+      ($\hat{n}_{01} \parallel \hat{n}_{12}$, $\hat{n}_{02} \not\parallel \hat{n}_{01}$):
+      two interfaces with two distinct normals — sequential Backus applies
+      (see below).  The \emph{primary} normal $\nn_\mathrm{in}$ is the average
+      of $\hat{n}_{01}$ and $\hat{n}_{12}$; the \emph{secondary} normal
+      $\nn_\mathrm{out}$ is $\hat{n}_{02}$.
+\item \textbf{Otherwise}: the structure is ambiguous; the cell falls back to
+      the standard single-interface nodal path using the global SVD normal.
+\end{itemize}
+
+\subsection*{Sequential Backus for $M = 3$ materials}
+
+Label the three distinct materials in sorted order with conductivities
+$\sigma_1 < \sigma_2 < \sigma_3$ (or mean tensors $\sigma^{(j)}$ in the
+anisotropic case) and volume fractions $f_1, f_2, f_3$ in $H$.  Let
+$\nn_\mathrm{in}$ and $\nn_\mathrm{out}$ be the inner and outer boundary
+normals (innermost boundary first).  The \emph{inner} (sandwiched) material
+is always identified as the one with the \emph{middle} conductivity value
+$\sigma_2$; the two \emph{outer} materials are $\sigma_1$ and $\sigma_3$.
+
+Both homogenization steps apply the same 2-material nodal formula
+\eqref{eq:SigmaD} — there is no switch to a simpler (e.g.\ Backus/laminate)
+formula at either level:
+
+\begin{enumerate}
+\item \textbf{Outer homogenization.}
+Apply the nodal formula \eqref{eq:SigmaD} to the two
+\emph{outer} materials $(\sigma_1, f_1)$ and $(\sigma_3, f_3)$ with
+normal $\nn_\mathrm{out}$, treating them as if they occupied the whole cell
+in proportion $f_1/(f_1+f_3)$ and $f_3/(f_1+f_3)$.  Per-axis line fractions
+are computed from the central-axis lines of the sub-grid restricted to the
+union of the outer-material voxels:
+\[
+  \SD^{(13)} \;=\; \tL_{13}^{-\top}\,G_{13}\,\tL_{13}^{-1}.
+\]
+\item \textbf{Inner homogenization.}
+Treat $\SD^{(13)}$ as one effective material and the inner material $\sigma_2$
+as the other.  Apply the nodal formula again with normal $\nn_\mathrm{in}$ and
+volume fractions $f_2$ (inner) and $f_1+f_3$ (outer):
+\[
+  \SD \;=\; \tL_\mathrm{in}^{-\top}\,G_\mathrm{in}\,\tL_\mathrm{in}^{-1}.
+\]
+Per-axis line fractions for step 2 are read from the full cell's central-axis
+lines (not restricted to the outer-material sub-block), so they correctly
+capture the inner material's extent relative to the whole dual cell.
+\end{enumerate}
+
+\subsection*{Interface normals: exact vs.\ estimated}
+
+In the \emph{exact geometry} path (\S\ref{sec:exact_n}), both $\nn_\mathrm{in}$
+and $\nn_\mathrm{out}$ are supplied analytically by the interface description
+(e.g.\ the cylinder's outward normal and the dip plane's normal at the node).
+No sub-SVD analysis is needed.
+
+In the \emph{lookup-function} path (\S\ref{sec:sigma_func}), the normals are
+determined by the per-pair sub-SVDs described above.
+
+\subsection*{Fallback}
+
+If the sequential-Backus result has a maximum eigenvalue exceeding three times
+the largest material conductivity (a symptom of near-degeneracy when one material
+has very low normal conductivity and dominates $G_{nn}$), the algorithm falls
+back to the standard single-interface 2-material nodal formula using the
+best-separating normal among all candidates.
+
+\begin{remark}[Nesting convention]
+The order of the two Backus steps matters.  The convention ``outer materials
+first'' is chosen so that the inner sandwiched material is always
+homogenized last, against a background that already reflects the outer
+structure.  For DDH03-type geometries (cylindrical borehole inside a dipping
+formation), $\nn_\mathrm{in}$ is the cylinder axis normal and
+$\nn_\mathrm{out}$ is the formation dip-plane normal.
+\end{remark}
+
+\bigskip
+\noindent\textbf{Reference.}\\
+S.\ Moskow, V.\ Druskin, T.\ Habashy, P.\ Lee, and S.\ Davydycheva,
+\emph{A finite difference scheme for elliptic equations with rough coefficients
+using a Cartesian grid nonconforming to interfaces},
+SIAM J.\ Numer.\ Anal., 36(2):442--464, 1999.
+
+\end{document}
