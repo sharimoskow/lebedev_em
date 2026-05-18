@@ -65,8 +65,7 @@ fine sub-grid (geometric SVD); a planarity ratio detects unreliable estimates
 and triggers a diagonal fallback.  For tensor-valued callables the SVD uses
 $\tfrac{1}{3}\mathrm{tr}\,\sigma$ as a scalar proxy.
 
-Dual cells straddling two interfaces are handled by a sequential application
-of the nodal formula: the two outer materials are homogenized first with the
+Dual cells straddling two interfaces are handled by sequential nodal homogenization: the two outer materials are homogenized first with the
 outer boundary normal, then the result is homogenized against the sandwiched
 inner material (identified by its median conductivity) with the inner boundary
 normal.  A fallback to single-interface treatment is applied when the
@@ -728,7 +727,7 @@ where $n_\mathrm{svd} = \lceil \Delta x / h_\mathrm{svd}\rceil \times \cdots$.
 \end{remark}
 
 % ============================================================
-\section{Multi-Interface Cells: Sequential Backus}\label{sec:multilayer}
+\section{Multi-Interface Cells: Sequential Nodal Homogenization}\label{sec:multilayer}
 % ============================================================
 
 In practical geometries a dual cell may straddle \emph{two or more} planar
@@ -776,7 +775,7 @@ The resolved normals determine the cell structure:
       (\emph{multiregion nodal}), using the average of the resolved normals.
 \item \textbf{Adjacent pairs parallel, skip pair distinct}
       ($\hat{n}_{01} \parallel \hat{n}_{12}$, $\hat{n}_{02} \not\parallel \hat{n}_{01}$):
-      two interfaces with two distinct normals — sequential Backus applies
+      two interfaces with two distinct normals — sequential nodal homogenization applies
       (see below).  The \emph{primary} normal $\nn_\mathrm{in}$ is the average
       of $\hat{n}_{01}$ and $\hat{n}_{12}$; the \emph{secondary} normal
       $\nn_\mathrm{out}$ is $\hat{n}_{02}$.
@@ -784,7 +783,7 @@ The resolved normals determine the cell structure:
       the standard single-interface nodal path using the global SVD normal.
 \end{itemize}
 
-\subsection*{Sequential Backus for $M = 3$ materials}
+\subsection*{Sequential nodal homogenization for $M = 3$ materials}
 
 Label the three distinct materials in sorted order with conductivities
 $\sigma_1 < \sigma_2 < \sigma_3$ (or mean tensors $\sigma^{(j)}$ in the
@@ -833,14 +832,14 @@ determined by the per-pair sub-SVDs described above.
 
 \subsection*{Fallback}
 
-If the sequential-Backus result has a maximum eigenvalue exceeding three times
+If the sequential nodal homogenization result has a maximum eigenvalue exceeding three times
 the largest material conductivity (a symptom of near-degeneracy when one material
 has very low normal conductivity and dominates $G_{nn}$), the algorithm falls
 back to the standard single-interface 2-material nodal formula using the
 best-separating normal among all candidates.
 
 \begin{remark}[Nesting convention]
-The order of the two Backus steps matters.  The convention ``outer materials
+The order of the two homogenization steps matters.  The convention ``outer materials
 first'' is chosen so that the inner sandwiched material is always
 homogenized last, against a background that already reflects the outer
 structure.  For DDH03-type geometries (cylindrical borehole inside a dipping
