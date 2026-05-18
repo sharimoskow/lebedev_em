@@ -13,6 +13,11 @@ The scheme uses a staggered Lebedev grid that naturally
 accommodates full anisotropic conductivity tensors, making it well-suited for
 deviated-well scenarios with dipping anisotropic formations.
 
+**Potential applications** include standard borehole EM logging, deviated-well
+scenarios with dipping beds, and EM-based fracture/crack imaging — where cracks
+appear as sharp conductivity contrasts at arbitrary orientations, precisely the
+case handled by the oblique-interface nodal homogenization.
+
 ---
 
 ## Features
