@@ -1,5 +1,5 @@
 """
-compute_reference.py — Fine reference solution, k=5 nodal, DZ=0.125m z-grid.
+compute_reference.py — Fine reference solution, k=6 nodal, DZ=0.125m z-grid.
 Run once; saves tilted_reference.npz for use by tilted_convergence.py.
 """
 import sys, os, time
@@ -18,7 +18,7 @@ Z_IFACE = D_PLANE*np.sqrt(2.)
 X_SRC, Y_SRC, Z_SRC = 0., 0., -2.
 GAMMA = 1./np.sqrt(2.)
 TARGET_XMAX = 20.0
-K_REF = 5
+K_REF = 6
 
 DZ = 0.125
 n_inner = int(round(6.0 / DZ))       # 6m inner domain, 48 cells

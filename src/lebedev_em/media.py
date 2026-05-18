@@ -237,7 +237,7 @@ def _nodal_effective_tensor_layered(
 
     For a unit interface normal n̂ = ê_{normal_axis} the formula reduces to:
 
-        ΣD = diag(σ̄, σ̄, σ̃³)   (normal diagonal entry is σ̃³, not σ̃)
+        ΣD = diag(σ̄, σ̄, σ̃)   (arithmetic tangential, harmonic normal)
 
     where σ̄ = Σ f_i σ_i  (arithmetic),  σ̃ = (Σ f_i/σ_i)⁻¹  (harmonic).
 
@@ -262,9 +262,9 @@ def _nodal_effective_tensor_layered(
     if abs(sigma_arith - sigma_harm) < 1e-10 * abs(sigma_arith):
         return None
 
-    # ΣD = diag(σ̄, σ̄, σ̃³) with σ̃³ at the normal axis
+    # ΣD = diag(σ̄, σ̄, σ̃) with σ̃ at the normal axis
     tensor = np.eye(3, dtype=complex) * sigma_arith
-    tensor[normal_axis, normal_axis] = sigma_harm ** 3
+    tensor[normal_axis, normal_axis] = sigma_harm
     return tensor
 
 

@@ -7,7 +7,7 @@ Compares:
   • Pointwise assignment
 
 Interface: n̂=[1,0,1]/√2,  x+z=√2 m,  σ₁=0.1 S/m, σ₂=1.0 S/m, f=100 Hz.
-Reference: k=5 nodal solution (pre-computed, loaded from tilted_reference.npz).
+Reference: k=6 nodal solution (pre-computed, loaded from tilted_reference.npz).
 """
 import sys, os, time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -32,7 +32,7 @@ X_SRC, Y_SRC, Z_SRC = 0., 0., -2.
 
 GAMMA       = 1.0 / np.sqrt(2.)
 TARGET_XMAX = 20.0
-K_VALS      = [1, 2, 3, 4]
+K_VALS      = [1, 2, 3, 4, 5]
 
 DZ      = 0.125
 n_inner = int(round(6.0 / DZ))
@@ -109,7 +109,7 @@ for k in K_VALS:
     print()
 
 # ── Plot ──────────────────────────────────────────────────────────────────────
-COLORS = {k: c for k, c in zip(K_VALS, ["tab:blue","tab:orange","tab:green","tab:red"])}
+COLORS = {k: c for k, c in zip(K_VALS, ["tab:blue","tab:orange","tab:green","tab:red","tab:purple"])}
 
 fig, axes = plt.subplots(2, 3, figsize=(17, 11))
 fig.suptitle(
