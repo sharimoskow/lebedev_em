@@ -70,3 +70,6 @@ _*.txt
 
 # Build artifacts
 CLAUDE.md
+
+# Allow PDFs in docs/
+!docs/*.pdf
