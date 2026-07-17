@@ -48,26 +48,25 @@ def _build_d_dx(
     """
     if from_R:
         out_nodes = grid.P_nodes    # P-node is output
-        out_idx   = grid.P_idx
         in_idx    = grid.R_idx      # R-node is input
         N_out, N_in = grid.N_P, grid.N_R
         x = grid.x
     else:
         out_nodes = grid.R_nodes
-        out_idx   = grid.R_idx
         in_idx    = grid.P_idx
         N_out, N_in = grid.N_R, grid.N_P
         x = grid.x
 
     rows, cols, vals = [], [], []
     for seq, (i, j, k) in enumerate(out_nodes):
-        # For E→H (from_R=True): Dirichlet on primary (E), Neumann on dual (H).
-        # Do NOT skip boundary P-nodes globally — only the derivative in the
-        # direction normal to the boundary face is zero (Neumann).  P-nodes on
-        # y- or z-boundary faces still have a well-defined x-derivative from
-        # interior x-neighbours and must not be skipped here.
         # For H→E (from_R=False): skip same-axis boundary R-nodes; the full
-        # set of BC R-node DOFs is handled by apply_electric_bc.
+        # set of electric-BC R-node DOFs is handled by apply_electric_bc.
+        # For E→H (from_R=True): rows are built wherever both ±1 x-neighbours
+        # exist.  The magnetic boundary condition H×n=0 (DDH03 eq. 6) is NOT
+        # handled here: build_curl_RE zeroes the ENTIRE row of every
+        # tangential H component at boundary P-nodes (see
+        # _tangential_h_row_masks); keeping only the formable term of a
+        # partial stencil would leave a spurious nonzero tangential H.
         if not from_R:
             if i == 0 or i == grid.Mx:
                 continue
@@ -93,13 +92,11 @@ def _build_d_dy(
     """d/dy matrix; see _build_d_dx for documentation."""
     if from_R:
         out_nodes = grid.P_nodes
-        out_idx   = grid.P_idx
         in_idx    = grid.R_idx
         N_out, N_in = grid.N_P, grid.N_R
         y = grid.y
     else:
         out_nodes = grid.R_nodes
-        out_idx   = grid.R_idx
         in_idx    = grid.P_idx
         N_out, N_in = grid.N_R, grid.N_P
         y = grid.y
@@ -129,13 +126,11 @@ def _build_d_dz(
     """d/dz matrix; see _build_d_dx for documentation."""
     if from_R:
         out_nodes = grid.P_nodes
-        out_idx   = grid.P_idx
         in_idx    = grid.R_idx
         N_out, N_in = grid.N_P, grid.N_R
         z = grid.z
     else:
         out_nodes = grid.R_nodes
-        out_idx   = grid.R_idx
         in_idx    = grid.P_idx
         N_out, N_in = grid.N_R, grid.N_P
         z = grid.z
@@ -162,6 +157,39 @@ def _build_d_dz(
 # Public: full 3×3 block curl operators
 # ---------------------------------------------------------------------------
 
+def _tangential_h_row_masks(grid: LebedevGrid3D) -> list[sp.dia_matrix]:
+    """
+    Diagonal 0/1 row masks implementing the magnetic boundary condition of
+    DDH03 eq. (6):  H^P|∂Ω × n = 0.
+
+    H_comp is *tangential* to a boundary face whose normal axis differs from
+    comp; the BC sets it identically to zero there, so its entire row in
+    C_RE must be dropped.  (Dropping only the term with a missing ghost
+    neighbour — as a partial stencil would — leaves a spurious nonzero
+    tangential H that breaks the E/M mixed-BC error cancellation and the
+    discrete adjointness of the curl pair.)  The *normal* H component on a
+    face is fully formable from in-face E values and keeps its stencil; it
+    is not constrained by H×n = 0.
+
+    Returns
+    -------
+    [K_x, K_y, K_z] : list of (N_P × N_P) diagonal matrices
+        K_c has 0 on the diagonal at every P-node where H_c is tangential
+        to some boundary face, 1 elsewhere.
+    """
+    keep = np.ones((3, grid.N_P))
+    for seq, (i, j, k) in enumerate(grid.P_nodes):
+        on_face = (
+            i == 0 or i == grid.Mx,
+            j == 0 or j == grid.My,
+            k == 0 or k == grid.Mz,
+        )
+        for comp in range(3):
+            if any(on_face[a] for a in range(3) if a != comp):
+                keep[comp, seq] = 0.0
+    return [sp.diags(keep[c]) for c in range(3)]
+
+
 def build_curl_RE(grid: LebedevGrid3D) -> sp.csr_matrix:
     """
     Build the curl operator  C_RE : E^R → (curl E)^P.
@@ -176,6 +204,12 @@ def build_curl_RE(grid: LebedevGrid3D) -> sp.csr_matrix:
                [-Dy_RP   Dx_RP   0     ]
 
     where Dx_RP is the N_P × N_R matrix for d/dx (from R to P).
+
+    The magnetic boundary condition H×n = 0 of DDH03 eq. (6) is built in:
+    the row of every *tangential* H component at a boundary P-node is
+    identically zero (see _tangential_h_row_masks), so C_RE @ E yields
+    exactly zero tangential H on all six faces.  Normal H components at the
+    boundary keep their (fully formable) stencils.
     """
     Dx = _build_d_dx(grid, from_R=True)   # N_P × N_R
     Dy = _build_d_dy(grid, from_R=True)
@@ -183,10 +217,13 @@ def build_curl_RE(grid: LebedevGrid3D) -> sp.csr_matrix:
 
     Z = sp.csr_matrix((grid.N_P, grid.N_R))  # zero block
 
-    # Row order: Hx = Dz·Ey − Dy·Ez, Hy = Dx·Ez − Dz·Ex, Hz = Dy·Ex − Dx·Ey
-    top    = sp.hstack([Z,   -Dz,  Dy ])   # Hx row: [0 | -Dz | Dy]
-    middle = sp.hstack([Dz,   Z,  -Dx ])   # Hy row: [Dz | 0 | -Dx]
-    bottom = sp.hstack([-Dy,  Dx,  Z  ])   # Hz row: [-Dy | Dx | 0]
+    # Magnetic BC (eq. 6): zero whole rows of tangential H at boundary P-nodes
+    Kx, Ky, Kz = _tangential_h_row_masks(grid)
+
+    # Row order: Hx = Dy·Ez − Dz·Ey, Hy = Dz·Ex − Dx·Ez, Hz = Dx·Ey − Dy·Ex
+    top    = sp.hstack([Z,          -(Kx @ Dz),  Kx @ Dy ])   # Hx row
+    middle = sp.hstack([Ky @ Dz,     Z,         -(Ky @ Dx)])  # Hy row
+    bottom = sp.hstack([-(Kz @ Dy),  Kz @ Dx,    Z       ])   # Hz row
 
     return sp.vstack([top, middle, bottom], format="csr")
 

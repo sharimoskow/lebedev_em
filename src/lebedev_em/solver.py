@@ -15,7 +15,9 @@ Two solve modes are available:
     Cost: one direct solve (vs. four for solve_clustered) → ~4× faster.
 
   solve_clustered  (legacy, isotropic-only):
-    Solves the four Lebedev clusters independently and averages.  Correct only
+    Solves the four Lebedev clusters independently and combines them into a
+    composite field (the DDH03 interpolate-then-average step is done in
+    postprocess.lebedev_E_at_point).  Correct only
     when σ, μ, ε are diagonal (isotropic); underestimates inter-cluster coupling
     for anisotropic media.  Kept for comparison and regression testing.
 
@@ -62,9 +64,11 @@ def _cluster_bc_dofs(grid: LebedevGrid3D, cluster: int) -> np.ndarray:
     E×n=0 (tangential E = 0) and leaves the normal E free for the M-BC clusters.
 
     The M-BC condition H×n=0 (tangential H = 0 at the boundary) is enforced
-    through the curl operator: in build_curl_RE, ALL boundary P-nodes are skipped
-    so H = 0 at every boundary face — implementing H×n = 0 (and, consequently,
-    the full DDH03 combined BC eq. 6).
+    through the curl operator: build_curl_RE zeroes the ENTIRE row of every
+    tangential H component at boundary P-nodes (normal H components keep
+    their stencils), so tangential H vanishes identically on all six faces —
+    implementing H×n = 0 and, together with the Dirichlet set below, the
+    full DDH03 combined BC eq. 6.
     """
     from .grid import _CLUSTER_BC
 
@@ -266,7 +270,11 @@ class LebedevMaxwellSolver:
         Returns
         -------
         result : dict
-            'E_avg' : ndarray (3·N_R,) — per-node average over 4 clusters.
+            'E_avg' : ndarray (3·N_R,) — composite field: each DOF carries its
+                      owning cluster's solution value (same convention as
+                      solve_coupled).  This is NOT the interpolated Lebedev
+                      4-cluster average; use postprocess.lebedev_E_at_point
+                      with 'E_c' for that.
             'E_c'   : dict {cluster → ndarray (3·N_R,)} — per-cluster solutions.
             'rhs'   : dict {cluster → ndarray} — per-cluster RHS vectors.
         """
@@ -279,7 +287,14 @@ class LebedevMaxwellSolver:
             A_bc, b_bc = apply_electric_bc(self._A.copy(), rhs_all[c].copy(), bc_dofs)
             E_clusters[c] = spla.spsolve(A_bc, b_bc)
 
-        E_avg = np.mean(
+        # The four cluster solutions have (numerically) disjoint supports:
+        # each DOF is owned by exactly one cluster and, for the isotropic
+        # media this method is valid for, only that cluster's solve excites
+        # it.  The composite field is therefore their SUM, giving each DOF
+        # its owning cluster's value — identical in convention to the single
+        # vector returned by solve_coupled.  (A np.mean here would silently
+        # scale every DOF by 1/4.)
+        E_avg = np.sum(
             np.stack([E_clusters[c] for c in (C000, C101, C110, C011)], axis=0),
             axis=0,
         )
@@ -335,7 +350,13 @@ class LebedevMaxwellSolver:
     ) -> np.ndarray:
         """
         Extract the (Ex, Ey, Ez) field at a physical point (x, y, z) from a
-        solve result by finding the nearest R-node.
+        solve result by reading the nearest R-node.
+
+        This is a raw nearest-node sample of the composite solution: each
+        component at that node is the value computed by the single cluster
+        that owns it there.  It is NOT the DDH03 interpolate-then-average
+        Lebedev field (eq. 7); for the superconvergent averaged value use
+        ``postprocess.lebedev_E_at_point(grid, result['E_c'], comp, x, y, z)``.
 
         Parameters
         ----------
@@ -344,20 +365,38 @@ class LebedevMaxwellSolver:
         x, y, z : float
             Evaluation point.
         use_average : bool
-            If True use the averaged field; if False return all 4 cluster values.
+            If True read the composite 'E_avg' vector; if False return a dict
+            of the per-cluster vectors' values at the node.
 
         Returns
         -------
-        E : ndarray, shape (3,) — field (Ex, Ey, Ez) at nearest R-node.
+        E : ndarray, shape (3,) — field (Ex, Ey, Ez) at the nearest R-node.
         """
         grid = self.grid
         i = int(np.argmin(np.abs(grid.x - x)))
         j = int(np.argmin(np.abs(grid.y - y)))
         k = int(np.argmin(np.abs(grid.z - z)))
 
-        # Make sure we're at an R-node
+        # Make sure we're at an R-node (odd index-parity sum).  If the nearest
+        # node is a P-node, step one index along one axis, choosing the
+        # in-bounds neighbour closest to the requested point.
         if (i + j + k) % 2 == 0:
-            i = min(i + 1, grid.Mx)
+            best = None
+            for d, (idx, arr, M) in enumerate(
+                [(i, grid.x, grid.Mx), (j, grid.y, grid.My), (k, grid.z, grid.Mz)]
+            ):
+                for s in (-1, +1):
+                    if 0 <= idx + s <= M:
+                        cand = [i, j, k]
+                        cand[d] = idx + s
+                        dist = np.sqrt(
+                            (grid.x[cand[0]] - x) ** 2
+                            + (grid.y[cand[1]] - y) ** 2
+                            + (grid.z[cand[2]] - z) ** 2
+                        )
+                        if best is None or dist < best[0]:
+                            best = (dist, cand)
+            i, j, k = best[1]
 
         seq = int(grid.R_idx[i, j, k])
         if seq < 0:

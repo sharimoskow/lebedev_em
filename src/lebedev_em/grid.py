@@ -13,7 +13,6 @@ Reference: Davydycheva, Druskin & Habashy (2003), Geophysics 68(5):1525–1536.
 from __future__ import annotations
 
 import numpy as np
-from dataclasses import dataclass, field
 from typing import Tuple
 
 # ---------------------------------------------------------------------------

@@ -50,12 +50,13 @@ class TestDerivativeMatrices:
         result = Dx @ f_R
         # At interior P-nodes the result should be ≈ 1.0 (uniform grid, exact)
         for seq, (i, j, k) in enumerate(grid.P_nodes):
-            # The build_curl_RE operator skips ALL boundary P-nodes (not just
-            # x-faces), so we must skip any P-node on any boundary face.
-            if (i == 0 or i == grid.Mx or
-                    j == 0 or j == grid.My or
-                    k == 0 or k == grid.Mz):
-                continue  # boundary — row is zero in matrix
+            # The raw _build_d_dx matrix has a zero row only where an
+            # x-neighbour is missing (i == 0 or i == Mx); P-nodes on y/z
+            # boundary faces still carry an exact x-derivative.  (The
+            # magnetic BC row-zeroing of tangential H happens later, in
+            # build_curl_RE, not in the raw derivative matrices.)
+            if i == 0 or i == grid.Mx:
+                continue  # x-face — row is zero in the raw matrix
             np.testing.assert_allclose(
                 result[seq], 1.0, rtol=1e-10,
                 err_msg=f"d/dx(x) ≠ 1 at P-node ({i},{j},{k}), seq={seq}."
