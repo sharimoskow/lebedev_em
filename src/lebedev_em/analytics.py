@@ -18,14 +18,17 @@ from .media import MU0, EPS0
 def _wavenumber(omega: float, sigma: float, mu: float, eps: float) -> complex:
     """
     Complex wavenumber k for a homogeneous isotropic medium.
-    k² = iω μ (σ − iω ε) = iω μ σ̇
-    Convention: time dependence exp(−iωt), so Im(k) > 0 for decaying field.
+
+    Convention: time dependence exp(−iωt), so Ampère's law reads
+    ∇×H = σE − iωεE + J (DDH03 eq. 1) and the complex conductivity is
+    σ̇ = σ − iωε.  Then
+
+        k² = iω μ σ̇ = iω μ σ + ω² μ ε.
+
+    The branch with Im(k) > 0 is chosen so exp(ikr) decays away from the
+    source.
     """
-    sigma_dot = complex(sigma) - 1j * omega * eps  # σ̇ = σ + iωε  (note sign)
-    # Actually: σ̇ = σ + iωε in DDH03 (eq 1: ∇×H = σE − iωεE),
-    # so effective conductivity is σ_eff = σ − iωε.  But k² = iωμσ̇:
     k_sq = 1j * omega * mu * (sigma - 1j * omega * eps)
-    # Choose branch with Im(k) > 0 (fields decay away from source)
     k = np.sqrt(k_sq + 0j)
     if np.imag(k) < 0:
         k = -k
@@ -66,65 +69,34 @@ def magnetic_dipole_B(
 
     Notes
     -----
-    For a magnetic dipole m at the origin the magnetic field is (SI, frequency domain):
+    Closed form (SI units, exp(−iωt) convention, k² = iωμ(σ − iωε), Im k > 0;
+    Jackson §9.3 / Chew 1995 §2.3, adapted to a conducting medium):
 
-        B = (μ/4π) { [3(m·r̂)r̂ − m] (k²r² − 3ikr − 3)/r³ + m k²(ikr − 1)/r } exp(ikr)/(k²r²)  × (−1/r)
+        B(r) = (μ / 4π) { k² (r̂ × m) × r̂ exp(ikr)/r
+                         + [3r̂(r̂·m) − m](1/r³ − ik/r²) exp(ikr) }
 
-    or more compactly using the dyadic Green's function:
+    Equivalently, with the magnetic dyadic Green's function
 
-        Bₐ = (μ m / 4π) Gₐᵦ mᵦ / (k²r²)  × f(kr) + ...
+        G_αβ(r) = exp(ikr)/(4π r³) { (3r̂ₐr̂ᵦ − δₐᵦ)(1 − ikr)
+                                     + (δₐᵦ − r̂ₐr̂ᵦ) k²r² },
 
-    We use the standard result for the αβ component of the magnetic Green's function:
-
-        G_αβ(r) = exp(ikr)/(4π r³) { (3r̂ₐr̂ᵦ − δₐᵦ)(1 − ikr) + (r̂ₐr̂ᵦ − δₐᵦ) k²r² }   ... (*)
-                  + δₐᵦ δ(r)/3
-
-    Away from the source the delta term vanishes and we use (*).  See, e.g.,
-    Chew (1995), "Waves and Fields in Inhomogeneous Media", §2.3.
+    B_α = μ G_αβ m_β away from the source (the δ(r) contact term vanishes).
+    Static limit (k → 0):  B → (μ/4π) [3r̂(r̂·m) − m] / r³.
     """
-    r_vec = np.array([x, y, z], dtype=complex)
-    r = float(np.real(np.sqrt(np.dot(r_vec, r_vec))))
+    r_vec = np.array([x, y, z], dtype=float)
+    r = float(np.linalg.norm(r_vec))
     if r < 1e-30:
         raise ValueError("Observation point must not be at the origin (singularity).")
 
     k = _wavenumber(omega, sigma, mu, eps)
     kr = k * r
-    r_hat = np.array([x, y, z]) / r
-
-    # Scalar prefactor
-    pref = mu * moment / (4.0 * np.pi * r**3)
+    r_hat = r_vec / r
     exp_ikr = np.exp(1j * kr)
 
     # Dipole direction vector
     m_hat = np.zeros(3)
     m_hat[dipole_comp] = 1.0
-
-    # Cross-terms (3 (m·r̂) r̂ − m)
     m_dot_rhat = float(np.dot(m_hat, r_hat))
-    cross_term = 3.0 * m_dot_rhat * r_hat - m_hat
-
-    # B = (μ m / 4π r³) exp(ikr) { cross_term (1 − ikr − k²r²/3) + ... }
-    # Full formula (see e.g. Griffiths / Chew):
-    #   B = (μ/4π) exp(ikr)/r³ { cross_term [k²r² − 3ikr − 3]/k²r²
-    #                            + m_hat [k²r²]/k²r² }  × k²
-    # Simplifying using the textbook form:
-    #   B_near/mid = pref · exp(ikr) { cross_term (1 − ikr) − m_hat (kr)² }  / k²r²  × k²
-    # Use the exact formula:
-    factor_near = (1.0 - 1j * kr) * exp_ikr / (kr**2)
-    factor_far  = exp_ikr  # k²r² term
-
-    B = pref * (
-        cross_term * (1.0 - 1j * kr - (kr)**2 / 3.0) * exp_ikr / (kr**2 / 3.0 + 1e-300)
-        # This is getting complicated; use the exact closed-form instead:
-    )
-
-    # ---- Exact closed-form (Chew 1995, eq. 2.3.8 or Jackson §9.1) ----
-    # For magnetic dipole m = moment * ê_α in homogeneous medium:
-    #
-    #   B(r) = (μ / 4π) { k² (r̂ × m) × r̂ exp(ikr)/r
-    #                    + [3r̂(r̂·m) − m](1/r³ − ik/r²) exp(ikr) }
-    #
-    # (SI, exp(−iωt) convention)
 
     rxm = np.cross(r_hat, m_hat)
     rxmxr = np.cross(rxm, r_hat)  # = m − (m·r̂)r̂ = transverse part of m

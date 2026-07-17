@@ -49,7 +49,8 @@ from lebedev_em.grid import (symmetric_optimal_grid, optimal_geometric_1d,
 from lebedev_em.media import homogeneous_isotropic, MU0
 from lebedev_em.solver import LebedevMaxwellSolver, _cluster_bc_dofs
 from lebedev_em.operators import apply_electric_bc
-from lebedev_em.postprocess import compute_B_from_E, build_rhs_per_cluster
+from lebedev_em.postprocess import (compute_B_from_E, build_rhs_per_cluster,
+                                    interpolate_cluster_B)
 from lebedev_em.analytics import Bxx_homogeneous
 
 # ── Physical parameters ───────────────────────────────────────────────────────
@@ -97,14 +98,16 @@ def build_grid(k):
 
 # ── Per-cluster B extraction from separate per-cluster B-vectors ──────────────
 # DDH03 Fig 2 comes from 4 SEPARATE cluster solves (one unit-moment source each).
-# Each cluster's B is read at its OWN native P-node positions from its OWN solve.
-# This is the correct approach: each cluster sees only its own unit-moment dipole.
+# Each cluster's B is interpolated to the receiver from its OWN native Hx
+# sub-grid of its OWN solve, using coordinate-based linear weights (DDH03's
+# conditions Σw=1 and centroid-at-receiver hold exactly, also in the
+# nonuniform geometric z-zone used for Fig 3).
 #
 # Cluster → native P-node type for Hx (from _H_CLUSTER_MAP):
-#   C011: type (0,0,0) → node (i0, j0, k)          (single node per receiver)
-#   C000: type (0,1,1) → nodes (i0, j0±1, k±1)     (4 nodes, averaged)
-#   C101: type (1,1,0) → nodes (i0±1, j0±1, k)     (4 nodes, averaged)
-#   C110: type (1,0,1) → nodes (i0±1, j0, k±1)     (4 nodes, averaged)
+#   C011: type (0,0,0) → receiver node itself (weight 1)
+#   C000: type (0,1,1) → 4 nodes (i0, j0±1, k±1), bilinear weights in (y,z)
+#   C101: type (1,1,0) → 4 nodes (i0±1, j0±1, k), bilinear weights in (x,y)
+#   C110: type (1,0,1) → 4 nodes (i0±1, j0, k±1), bilinear weights in (x,z)
 def extract_Bxx_separate(grid, B_clusters):
     """
     Extract per-cluster Bxx along the z-axis from 4 separate cluster B-vectors.
@@ -114,14 +117,8 @@ def extract_Bxx_separate(grid, B_clusters):
     """
     Mx, My, Mz = grid.Mx, grid.My, grid.Mz
     i0, j0 = Mx // 2, My // 2
-    N_P    = grid.N_P
+    x0, y0 = float(grid.x[i0]), float(grid.y[j0])
     comp   = 0  # Bx
-
-    def b_at(B_vec, i, j, k):
-        if not (0 <= i <= Mx and 0 <= j <= My and 0 <= k <= Mz):
-            return 0j
-        seq = int(grid.P_idx[i, j, k])
-        return 0j if seq < 0 else complex(B_vec[comp * N_P + seq])
 
     z_list, avg_list = [], []
     per_cl = {C011: [], C000: [], C101: [], C110: []}
@@ -129,17 +126,13 @@ def extract_Bxx_separate(grid, B_clusters):
     for k in range(0, Mz + 1, 2):
         if grid.P_idx[i0, j0, k] < 0:
             continue
-        # Each cluster reads its OWN B_vec at its OWN native Hx P-node positions
-        v011 = b_at(B_clusters[C011], i0, j0, k)
-        v000 = np.mean([b_at(B_clusters[C000], i0, j0+dj, k+dk) for dj in (+1,-1) for dk in (+1,-1)])
-        v101 = np.mean([b_at(B_clusters[C101], i0+di, j0+dj, k) for di in (+1,-1) for dj in (+1,-1)])
-        v110 = np.mean([b_at(B_clusters[C110], i0+di, j0,   k+dk) for di in (+1,-1) for dk in (+1,-1)])
-        z_list.append(float(grid.z[k]))
-        per_cl[C011].append(complex(v011))
-        per_cl[C000].append(complex(v000))
-        per_cl[C101].append(complex(v101))
-        per_cl[C110].append(complex(v110))
-        avg_list.append((complex(v011)+complex(v000)+complex(v101)+complex(v110))/4.)
+        zr = float(grid.z[k])
+        vals = {c: interpolate_cluster_B(grid, B_clusters[c], c, comp, x0, y0, zr)
+                for c in (C011, C000, C101, C110)}
+        z_list.append(zr)
+        for c in (C011, C000, C101, C110):
+            per_cl[c].append(vals[c])
+        avg_list.append(np.mean([vals[c] for c in (C011, C000, C101, C110)]))
 
     z_arr = np.array(z_list)
     order = np.argsort(z_arr)
@@ -239,29 +232,30 @@ fig.suptitle(
     fontsize=10)
 
 # ── Fig 2: near source, z = 0 to 0.35 m ──────────────────────────────────────
+# Plotted in units of 1e-9 T to match the DDH03 figure axes.
 m2 = (z_ax > 0) & (z_ax <= 0.35)
 for c in (C000, C101, C110, C011):
-    ax2.plot(z_ax[m2], np.imag(B_per_cl[c][m2]),
+    ax2.plot(z_ax[m2], 1e9 * np.imag(B_per_cl[c][m2]),
              'o-', color=cluster_colors[c], lw=1.5, ms=5, label=cluster_labels[c])
-ax2.plot(z_ax[m2], np.imag(B_avg[m2]), 'k-', lw=2.5, label='Lebedev avg', zorder=5)
-ax2.plot(z_ax[m2], np.imag(Bxx_homogeneous(z_ax[m2], SIGMA, OMEGA)),
+ax2.plot(z_ax[m2], 1e9 * np.imag(B_avg[m2]), 'k-', lw=2.5, label='Lebedev avg', zorder=5)
+ax2.plot(z_ax[m2], 1e9 * np.imag(Bxx_homogeneous(z_ax[m2], SIGMA, OMEGA)),
          'ko', ms=7, zorder=6, markerfacecolor='white', markeredgewidth=1.5,
          label='Analytic')
-ax2.set_xlabel('z (m)'); ax2.set_ylabel('Im(Bxx) [T/A·m²]')
+ax2.set_xlabel('z (m)'); ax2.set_ylabel(r'Im(Bxx) [$10^{-9}$ T]')
 ax2.set_title('Fig. 2 — Im(Bxx) near transmitter\n(clusters, Lebedev avg, analytic)')
 ax2.set_xlim([0, 0.35]); ax2.legend(fontsize=9); ax2.grid(True, alpha=0.3)
 
 # ── Fig 3: near outer boundary, z = 2 to 12 m (k=8 for large transverse domain)
 m3 = (z_ax3 >= 2.0) & (z_ax3 <= 12.0)
 for c in (C000, C101, C110, C011):
-    ax3.plot(z_ax3[m3], np.imag(B_per_cl3[c][m3]),
+    ax3.plot(z_ax3[m3], 1e9 * np.imag(B_per_cl3[c][m3]),
              'o-', color=cluster_colors[c], lw=1.5, ms=5, label=cluster_labels[c])
-ax3.plot(z_ax3[m3], np.imag(B_avg3[m3]), 'k-', lw=2.5, label='Lebedev avg', zorder=5)
-ax3.plot(z_ax3[m3], np.imag(Bxx_homogeneous(z_ax3[m3], SIGMA, OMEGA)),
+ax3.plot(z_ax3[m3], 1e9 * np.imag(B_avg3[m3]), 'k-', lw=2.5, label='Lebedev avg', zorder=5)
+ax3.plot(z_ax3[m3], 1e9 * np.imag(Bxx_homogeneous(z_ax3[m3], SIGMA, OMEGA)),
          'ko', ms=7, zorder=6, markerfacecolor='white', markeredgewidth=1.5,
          label='Analytic')
 ax3.axvline(z_max3, color='gray', ls=':', lw=1.2, label=f'z_max={z_max3:.1f} m')
-ax3.set_xlabel('z (m)'); ax3.set_ylabel('Im(Bxx) [T/A·m²]')
+ax3.set_xlabel('z (m)'); ax3.set_ylabel(r'Im(Bxx) [$10^{-9}$ T]')
 ax3.set_title('Fig. 3 — Im(Bxx) near outer boundary\n(clusters, Lebedev avg, analytic)')
 ax3.set_xlim([2, 12]); ax3.legend(fontsize=9); ax3.grid(True, alpha=0.3)
 

@@ -199,44 +199,6 @@ def extract_B_on_axis(
 
 
 # ---------------------------------------------------------------------------
-# Source normalisation helper
-# ---------------------------------------------------------------------------
-
-def source_normalization_factor(
-    grid: LebedevGrid3D,
-    source_node: tuple[int, int, int],
-    comp: int,
-) -> float:
-    """
-    Return the effective dipole moment (in A·m) corresponding to a unit FD
-    source weight at *source_node* for component *comp*.
-
-    In the Yee/Lebedev FD scheme an electric current density of unit weight
-    placed at node (i,j,k) for E_comp has an effective dipole moment equal to
-    the dual-cell edge length along comp:
-
-        p_eff = Δl_comp    [A·m]
-
-    where Δl_comp is the edge length of the primary cell at that node.
-
-    This factor converts between the FD "unit source" and the analytic dipole
-    formula which uses SI moment in A·m.
-    """
-    i, j, k = source_node
-    grids = [grid.x, grid.y, grid.z]
-    g = grids[comp]
-    idx = [i, j, k][comp]
-    # Primary edge length along comp at this node
-    if 0 < idx < len(g) - 1:
-        dl = (g[idx + 1] - g[idx - 1]) / 2.0
-    elif idx == 0:
-        dl = g[1] - g[0]
-    else:
-        dl = g[-1] - g[-2]
-    return float(dl)
-
-
-# ---------------------------------------------------------------------------
 # Proper Lebedev inter-cluster evaluation
 # ---------------------------------------------------------------------------
 
@@ -406,6 +368,164 @@ def _native_type_for_h_cluster_comp(cluster: int, comp: int) -> tuple:
     raise ValueError(f"No native P-type for cluster {cluster}, comp {comp}")
 
 
+def _trilinear_p_nodes(
+    grid: LebedevGrid3D,
+    native_type: tuple[int, int, int],
+    x0: float,
+    y0: float,
+    z0: float,
+) -> list[tuple[int, float]]:
+    """
+    Find P-nodes of parity *native_type* surrounding (x0, y0, z0) and return
+    their trilinear interpolation weights as (seq, weight) pairs.
+
+    P-node analogue of ``sources._trilinear_r_nodes``: the sub-grid for type
+    (t1,t2,t3) consists of all grid nodes with i≡t1, j≡t2, k≡t3 (mod 2).
+    Weights are coordinate-based (1-D linear interpolation along each axis),
+    so they satisfy the DDH03 averaging conditions
+
+        (1)  Σ w = 1,        (2)  Σ w · r_node = (x0, y0, z0)
+
+    exactly — also on nonuniform grids, where the previous equal-weight
+    stencils violated condition (2).  When the evaluation point lies outside
+    the sub-grid range along an axis (e.g. a receiver on the outermost grid
+    plane), the 1-D weights linearly EXTRApolate from the two nearest
+    sub-grid nodes; both conditions still hold and no phantom zero values
+    enter the stencil.
+    """
+    t1, t2, t3 = int(native_type[0]), int(native_type[1]), int(native_type[2])
+
+    x_sub = grid.x[t1::2]
+    y_sub = grid.y[t2::2]
+    z_sub = grid.z[t3::2]
+
+    ix_pairs = _interp1d_weights(x_sub, x0)
+    iy_pairs = _interp1d_weights(y_sub, y0)
+    iz_pairs = _interp1d_weights(z_sub, z0)
+
+    nodes_weights: list[tuple[int, float]] = []
+    for ix_sub, wx in ix_pairs:
+        for iy_sub, wy in iy_pairs:
+            for iz_sub, wz in iz_pairs:
+                i_full = t1 + 2 * ix_sub
+                j_full = t2 + 2 * iy_sub
+                k_full = t3 + 2 * iz_sub
+                if (0 <= i_full <= grid.Mx and
+                        0 <= j_full <= grid.My and
+                        0 <= k_full <= grid.Mz):
+                    seq = int(grid.P_idx[i_full, j_full, k_full])
+                    if seq >= 0:
+                        nodes_weights.append((seq, float(wx * wy * wz)))
+    return nodes_weights
+
+
+def interpolate_cluster_B(
+    grid: LebedevGrid3D,
+    B_vec: np.ndarray,
+    cluster: int,
+    comp: int,
+    x0: float,
+    y0: float,
+    z0: float,
+) -> complex:
+    """
+    Evaluate B_comp from *cluster*'s solution at (x0, y0, z0) by trilinear
+    interpolation on the cluster's native H_{comp} P-sub-grid.
+
+    B-field analogue of ``interpolate_cluster_E``.  The weights are
+    coordinate-based linear-interpolation weights (Σw = 1, centroid at the
+    evaluation point), as required by DDH03's averaging procedure, so the
+    result is second-order accurate also on nonuniform grids.
+
+    Boundary handling: nodes that fall outside the stored P-grid are skipped
+    and the remaining weights are renormalised to sum to 1 (this can only
+    happen for degenerate grids — every parity-consistent node inside the
+    domain is a P-node — and never silently dilutes the value with zeros).
+    Returns 0j if no stencil node exists at all.
+    """
+    native_type = _native_type_for_h_cluster_comp(cluster, comp)
+    nodes_weights = _trilinear_p_nodes(grid, native_type, x0, y0, z0)
+    if not nodes_weights:
+        return 0j
+
+    w_sum = sum(w for _, w in nodes_weights)
+    if abs(w_sum) < 1e-14:
+        return 0j
+
+    val: complex = 0j
+    for seq, w in nodes_weights:
+        val += w * B_vec[comp * grid.N_P + seq]
+    return complex(val / w_sum)
+
+
+def _magnetic_source_groups(
+    grid: LebedevGrid3D,
+    comp: int = 0,
+) -> tuple[tuple[int, int, int], dict[int, list[tuple[int, float]]]]:
+    """
+    Locate the nominal magnetic-dipole source node and build, for each
+    cluster, its (seq, weight) source group on the cluster's native H_{comp}
+    sub-grid.
+
+    Nominal source node: the type-(0,0,0) P-node (i0, j0, k0) with
+    i0 = Mx//2, j0 = My//2 and k0 the EVEN z-index closest to z = 0.
+    If z = 0 does not coincide with an even-index grid plane the source is
+    silently SNAPPED to z = z[k0]; a UserWarning is emitted when the snap
+    displacement exceeds 1e-9 of the local grid spacing, so grids that do
+    not centre the source exactly (see benchmark_figs2_3.py for how to
+    build one that does) are flagged rather than silently mislocated.
+
+    Weights are the coordinate-based linear-interpolation weights of the
+    (snapped) source point on each cluster's sub-grid, so every group
+    satisfies DDH03's source conditions (1) Σw = 1 and (2) Σw·r = r₀
+    exactly, also on nonuniform grids.  On a locally symmetric grid they
+    reduce to the familiar single weight-1 node (owning cluster) and three
+    groups of 4 nodes with weight 1/4.
+
+    Returns
+    -------
+    (i0, j0, k0) : the nominal source node indices.
+    groups       : dict {cluster → list of (P-seq, weight)}.
+    """
+    Mx, My, Mz = grid.Mx, grid.My, grid.Mz
+    i0 = Mx // 2
+    j0 = My // 2
+    k_even = np.arange(0, Mz + 1, 2)
+    k0 = int(k_even[np.argmin(np.abs(grid.z[k_even]))])
+
+    x0, y0, z0 = float(grid.x[i0]), float(grid.y[j0]), float(grid.z[k0])
+
+    dz_local = abs(float(grid.z[min(k0 + 1, Mz)] - grid.z[max(k0 - 1, 0)]))
+    if abs(z0) > 1e-9 * max(dz_local, 1e-300):
+        import warnings
+        warnings.warn(
+            f"Magnetic-dipole source snapped from z=0 to nearest even-index "
+            f"plane z={z0:.6g} m (offset {abs(z0):.3g} m). Build the z-grid so "
+            f"that z=0 is an even-index node to avoid this displacement.",
+            UserWarning,
+        )
+
+    groups: dict[int, list[tuple[int, float]]] = {}
+    for c in (C000, C101, C110, C011):
+        t = _native_type_for_h_cluster_comp(c, comp)
+        nodes_weights = _trilinear_p_nodes(grid, t, x0, y0, z0)
+        if not nodes_weights:
+            raise ValueError(
+                f"No native H sub-grid nodes found for cluster {c}, comp {comp}."
+            )
+        groups[c] = nodes_weights
+    return (i0, j0, k0), groups
+
+
+def _dual_cell_vol_p(grid: LebedevGrid3D, seq: int) -> float:
+    """Skip-2 dual-cell volume of P-node *seq* (clamped at the boundary)."""
+    i, j, k = grid.P_nodes[seq]
+    dx = float(grid.x[min(i + 1, grid.Mx)] - grid.x[max(i - 1, 0)])
+    dy = float(grid.y[min(j + 1, grid.My)] - grid.y[max(j - 1, 0)])
+    dz = float(grid.z[min(k + 1, grid.Mz)] - grid.z[max(k - 1, 0)])
+    return abs(dx * dy * dz)
+
+
 def build_rhs_per_cluster(
     grid,
     C_PR,
@@ -416,11 +536,17 @@ def build_rhs_per_cluster(
     Build four separate RHS vectors — one per Lebedev cluster — for a unit-moment
     magnetic dipole source oriented along *hx_comp* (default 0 = x).
 
-    For each cluster c the source is placed on c's native H_{hx_comp} sub-grid
-    nodes that surround the nominal source point (i0, j0, k0):
-      • One cluster has exactly one native node at (i0, j0, k0) → weight = 1
-      • The other three clusters each have 4 surrounding nodes → weight = 1/4 each
-    All four groups satisfy (1) Σw = 1 and (2) Σw·r = r₀.
+    For each cluster c the source is distributed over c's native H_{hx_comp}
+    sub-grid nodes surrounding the nominal source point using coordinate-based
+    linear-interpolation weights (see ``_magnetic_source_groups``), so every
+    group satisfies DDH03's source conditions (1) Σw = 1 and (2) Σw·r = r₀
+    exactly, also on nonuniform grids.  Each node contributes
+    M_P = weight / V_dual (point-collocation normalisation: total injected
+    moment Σᵢ Mᵢ·Vᵢ = 1 A·m² per cluster) and the RHS is b_c = iω C_PR M_P.
+
+    Source position: the type-(0,0,0) P-node nearest to (0, 0, 0); if z = 0
+    is not an even-index grid plane the source snaps to the nearest such
+    plane and a UserWarning is emitted (see ``_magnetic_source_groups``).
 
     Parameters
     ----------
@@ -433,53 +559,19 @@ def build_rhs_per_cluster(
     -------
     rhs_per_c : dict {cluster_int → ndarray (3·N_R,), complex}
     """
-    Mx, My, Mz = grid.Mx, grid.My, grid.Mz
-    i0 = Mx // 2
-    j0 = My // 2
-    # Nearest even k to z=0
-    k_even = np.arange(0, Mz + 1, 2)
-    k0 = int(k_even[np.argmin(np.abs(grid.z[k_even]))])
+    (i0, j0, k0), groups = _magnetic_source_groups(grid, hx_comp)
     N_P = grid.N_P
-
-    def vol_p(i, j, k):
-        dx = float(grid.x[min(i + 1, Mx)] - grid.x[max(i - 1, 0)])
-        dy = float(grid.y[min(j + 1, My)] - grid.y[max(j - 1, 0)])
-        dz = float(grid.z[min(k + 1, Mz)] - grid.z[max(k - 1, 0)])
-        return abs(dx * dy * dz)
-
-    # Node groups per cluster:  cluster_int → list of (i, j, k, weight)
-    # H_x cluster map at the 4 possible P-node types:
-    #   type (0,0,0) → C011 owns Hx  ← one node exactly at (i0, j0, k0)
-    #   type (0,1,1) → C000 owns Hx  ← 4 nodes at (i0, j0±1, k0±1)
-    #   type (1,0,1) → C110 owns Hx  ← 4 nodes at (i0±1, j0, k0±1)
-    #   type (1,1,0) → C101 owns Hx  ← 4 nodes at (i0±1, j0±1, k0)
-    node_groups: dict[int, list] = {C000: [], C101: [], C110: [], C011: []}
-
-    for c in (C000, C101, C110, C011):
-        t1, t2, t3 = _native_type_for_h_cluster_comp(c, hx_comp)
-        # Find which ±offsets give this parity relative to (i0, j0, k0)
-        di_vals = [0] if t1 == i0 % 2 else [+1, -1]
-        dj_vals = [0] if t2 == j0 % 2 else [+1, -1]
-        dk_vals = [0] if t3 == k0 % 2 else [+1, -1]
-        nodes = [(i0 + di, j0 + dj, k0 + dk)
-                 for di in di_vals for dj in dj_vals for dk in dk_vals]
-        n = len(nodes)
-        w = 1.0 / n
-        node_groups[c] = [(i, j, k, w) for (i, j, k) in nodes]
 
     rhs_per_c: dict[int, np.ndarray] = {}
     for c in (C000, C101, C110, C011):
         M_P = np.zeros(3 * N_P, dtype=complex)
-        for (i, j, k, w) in node_groups[c]:
-            seq = int(grid.P_idx[i, j, k])
-            if seq < 0:
-                raise ValueError(f"P-node ({i},{j},{k}) not in P-grid for cluster {c}")
-            M_P[hx_comp * N_P + seq] += w / vol_p(i, j, k)
+        for seq, w in groups[c]:
+            M_P[hx_comp * N_P + seq] += w / _dual_cell_vol_p(grid, seq)
         rhs_per_c[c] = 1j * omega * (C_PR @ M_P)
 
     print(f"    Per-cluster source at ({i0},{j0},{k0})="
           f"({grid.x[i0]:.4f},{grid.y[j0]:.4f},{grid.z[k0]:.4f}), "
-          f"n_nodes/cluster={[len(node_groups[c]) for c in (C011,C000,C101,C110)]}",
+          f"n_nodes/cluster={[len(groups[c]) for c in (C000, C101, C110, C011)]}",
           flush=True)
 
     return rhs_per_c
@@ -490,28 +582,13 @@ def build_rhs_multicl(grid, C_PR: "sp.spmatrix", omega: float) -> np.ndarray:
     Build the RHS vector for an x-oriented magnetic dipole source distributed
     across all four Lebedev clusters (DDH03 multi-cluster source).
 
-    DDH03 requires that for each cluster:
-      (1) The sum of source weights = 1
-      (2) The center of mass of source nodes = the nominal source point (x₀, y₀, z₀)
-
-    The nominal source point is (x₀, y₀, z₀) = (0, 0, ~0), placed at the
-    P-node (i0, j0, k0) where i0=Mx//2, j0=My//2, k0=nearest even index to z=0.
-
-    H_x cluster ownership (from _H_CLUSTER_MAP):
-      type (0,0,0) → C011  ← the original single-cluster source node
-      type (0,1,1) → C000
-      type (1,0,1) → C110
-      type (1,1,0) → C101
-
-    For each cluster, we place 4 nodes surrounding (i0,j0,k0) with equal
-    weight 1/4 each, arranged symmetrically so the centre of mass = (i0,j0,k0):
-      C011: (i0, j0, k0)           — weight 1  (already type (0,0,0))
-      C000: (i0, j0±1, k0±1)      — 4 nodes, weight 1/4 each  (type (0,1,1))
-      C101: (i0±1, j0±1, k0)      — 4 nodes, weight 1/4 each  (type (1,1,0))
-      C110: (i0±1, j0, k0±1)      — 4 nodes, weight 1/4 each  (type (1,0,1))
-
-    Each source node contributes M_P[Hx_dof] = weight / vol_P(node), and the
-    total RHS is b = iω C_PR M_P.
+    This is simply the sum of the four per-cluster RHS vectors from
+    ``build_rhs_per_cluster``: the four clusters' native H_x sub-grids are
+    disjoint parity classes, so each DOF receives a contribution from exactly
+    one cluster and no double-counting occurs.  All weight and normalisation
+    properties (Σw = 1, Σw·r = r₀ per cluster, unit moment per cluster, snap
+    warning when z = 0 is not a grid plane) are inherited from
+    ``build_rhs_per_cluster``.
 
     Parameters
     ----------
@@ -523,52 +600,11 @@ def build_rhs_multicl(grid, C_PR: "sp.spmatrix", omega: float) -> np.ndarray:
     -------
     b : ndarray, shape (3·N_R,), complex — right-hand side vector
     """
-    Mx, My, Mz = grid.Mx, grid.My, grid.Mz
-    i0 = Mx // 2
-    j0 = My // 2
-    k_even = np.arange(0, Mz + 1, 2)
-    k0 = int(k_even[np.argmin(np.abs(grid.z[k_even]))])
-
-    def vol_p(i, j, k):
-        dx = float(grid.x[min(i + 1, Mx)] - grid.x[max(i - 1, 0)])
-        dy = float(grid.y[min(j + 1, My)] - grid.y[max(j - 1, 0)])
-        dz = float(grid.z[min(k + 1, Mz)] - grid.z[max(k - 1, 0)])
-        return abs(dx * dy * dz)
-
-    M_P_vec = np.zeros(3 * grid.N_P, dtype=complex)
-    N_P = grid.N_P
-
-    # Hx DOF offset = 0 * N_P
-    def add_hx(i, j, k, weight):
-        seq = int(grid.P_idx[i, j, k])
-        if seq < 0:
-            raise ValueError(f"P-node ({i},{j},{k}) not found in P-grid")
-        vol = vol_p(i, j, k)
-        M_P_vec[0 * N_P + seq] += weight / vol
-
-    # C011: single node at (i0, j0, k0), weight = 1
-    add_hx(i0, j0, k0, 1.0)
-
-    # C000: type (0,1,1) → (i0, j0±1, k0±1), weight = 1/4 each
-    for dj in (+1, -1):
-        for dk in (+1, -1):
-            add_hx(i0, j0 + dj, k0 + dk, 0.25)
-
-    # C101: type (1,1,0) → (i0±1, j0±1, k0), weight = 1/4 each
-    for di in (+1, -1):
-        for dj in (+1, -1):
-            add_hx(i0 + di, j0 + dj, k0, 0.25)
-
-    # C110: type (1,0,1) → (i0±1, j0, k0±1), weight = 1/4 each
-    for di in (+1, -1):
-        for dk in (+1, -1):
-            add_hx(i0 + di, j0, k0 + dk, 0.25)
-
-    print(f"    Multi-cl Hx source: ({i0},{j0},{k0}), "
-          f"pos=({grid.x[i0]:.4f},{grid.y[j0]:.4f},{grid.z[k0]:.4f}), "
-          f"nnz={np.count_nonzero(M_P_vec)}", flush=True)
-
-    return 1j * omega * (C_PR @ M_P_vec)
+    rhs_per_c = build_rhs_per_cluster(grid, C_PR, omega, hx_comp=0)
+    b = np.zeros(3 * grid.N_R, dtype=complex)
+    for c in (C000, C101, C110, C011):
+        b += rhs_per_c[c]
+    return b
 
 
 # ---------------------------------------------------------------------------
@@ -585,16 +621,21 @@ def extract_B_on_axis_multicl(
     Extract one component of **B** along the specified axis using the proper
     Lebedev multi-cluster average.
 
-    For comp=0 (Bx) on the z-axis:
-    - C011 owns Hx at type (0,0,0): node (i0, j0, k_r) for each receiver k_r
-    - C000 owns Hx at type (0,1,1): nodes (i0, j0±1, k_r±1) — average of 4
-    - C101 owns Hx at type (1,1,0): nodes (i0±1, j0±1, k_r) — average of 4
-    - C110 owns Hx at type (1,0,1): nodes (i0±1, j0, k_r±1) — average of 4
-
-    The four cluster contributions are averaged to give the Lebedev value.
+    Each cluster's contribution is obtained by trilinear interpolation on the
+    cluster's native H_{comp} P-sub-grid using coordinate-based weights
+    (Σw = 1, weighted centroid = receiver position — DDH03's linear
+    interpolation from the nearest shifted nodes, exact also on nonuniform
+    grids).  The four cluster contributions are then ARITHMETICALLY AVERAGED
+    to give the Lebedev value.  The cluster that owns B_{comp} at the
+    receiver's own node type contributes its nodal value directly (weight 1).
 
     Receiver positions: all even-k P-nodes with (i==i0, j==j0) — the
-    z-axis C011 nodes (same as the old single-cluster extraction).
+    z-axis type-(0,0,0) nodes (same as the old single-cluster extraction).
+
+    Boundary handling: for receivers on the outermost z-planes the shifted
+    sub-grids are evaluated by linear EXTRApolation from the two nearest
+    planes (see ``_trilinear_p_nodes``) instead of the previous behaviour of
+    averaging in phantom zeros for out-of-range nodes.
 
     Parameters
     ----------
@@ -615,15 +656,8 @@ def extract_B_on_axis_multicl(
     Mx, My, Mz = grid.Mx, grid.My, grid.Mz
     i0 = Mx // 2
     j0 = My // 2
-    N_P = grid.N_P
-
-    def b_at(i, j, k):
-        if not (0 <= i <= Mx and 0 <= j <= My and 0 <= k <= Mz):
-            return 0j
-        seq = int(grid.P_idx[i, j, k])
-        if seq < 0:
-            return 0j
-        return complex(B_vec[comp * N_P + seq])
+    x0 = float(grid.x[i0])
+    y0 = float(grid.y[j0])
 
     # Receiver positions: type-(0,0,0) nodes on z-axis = (i0, j0, k) for k even
     coords_list = []
@@ -633,26 +667,14 @@ def extract_B_on_axis_multicl(
         seq = int(grid.P_idx[i0, j0, k])
         if seq < 0:
             continue
+        z = float(grid.z[k])
 
-        # C011 contribution: (i0, j0, k)  — weight 1
-        val_C011 = b_at(i0, j0, k)
-
-        # C000 contribution: avg of (i0, j0±1, k±1) — type (0,1,1)
-        vals_C000 = [b_at(i0, j0 + dj, k + dk) for dj in (+1, -1) for dk in (+1, -1)]
-        val_C000 = complex(np.mean(vals_C000))
-
-        # C101 contribution: avg of (i0±1, j0±1, k) — type (1,1,0)
-        vals_C101 = [b_at(i0 + di, j0 + dj, k) for di in (+1, -1) for dj in (+1, -1)]
-        val_C101 = complex(np.mean(vals_C101))
-
-        # C110 contribution: avg of (i0±1, j0, k±1) — type (1,0,1)
-        vals_C110 = [b_at(i0 + di, j0, k + dk) for di in (+1, -1) for dk in (+1, -1)]
-        val_C110 = complex(np.mean(vals_C110))
-
-        b_avg = (val_C011 + val_C000 + val_C101 + val_C110) / 4.0
-
-        coords_list.append(float(grid.z[k]))
-        values_list.append(b_avg)
+        contributions = [
+            interpolate_cluster_B(grid, B_vec, c, comp, x0, y0, z)
+            for c in (C000, C101, C110, C011)
+        ]
+        coords_list.append(z)
+        values_list.append(complex(np.mean(contributions)))
 
     if not coords_list:
         raise RuntimeError("No on-axis P-nodes found for multi-cluster B extraction.")
@@ -672,14 +694,21 @@ def lebedev_B_on_z_axis(
     Compute the correct Lebedev-averaged B_{comp} on the z-axis using
     four separate cluster solutions (DDH03's proper multi-cluster approach).
 
-    Each cluster's B-field is read at its OWN native node type for *comp*,
-    and the four native values are then averaged.
+    Each cluster's B-field is interpolated to the receiver position from its
+    OWN native H_{comp} sub-grid using coordinate-based trilinear weights
+    (Σw = 1, weighted centroid = receiver — DDH03's linear interpolation,
+    exact also on nonuniform grids), and the four cluster contributions are
+    then ARITHMETICALLY AVERAGED.
 
-    This is equivalent to DDH03's procedure:
+    This is DDH03's procedure:
     (a) solve four separate systems, one per cluster source, using the
         coupled matrix A but each cluster's own RHS;
-    (b) extract B at each cluster's native nodes;
-    (c) average the four contributions.
+    (b) linearly interpolate B from each cluster's native nodes;
+    (c) take the arithmetic average of the four contributions.
+
+    Boundary handling: for receivers on the outermost z-planes the shifted
+    sub-grids are evaluated by linear extrapolation from the two nearest
+    planes (no phantom zeros; see ``_trilinear_p_nodes``).
 
     Parameters
     ----------
@@ -696,13 +725,8 @@ def lebedev_B_on_z_axis(
     Mx, My, Mz = grid.Mx, grid.My, grid.Mz
     i0 = Mx // 2
     j0 = My // 2
-    N_P = grid.N_P
-
-    def b_at(B_vec, i, j, k):
-        if not (0 <= i <= Mx and 0 <= j <= My and 0 <= k <= Mz):
-            return 0j
-        seq = int(grid.P_idx[i, j, k])
-        return 0j if seq < 0 else complex(B_vec[comp * N_P + seq])
+    x0 = float(grid.x[i0])
+    y0 = float(grid.y[j0])
 
     # Receiver positions: on-axis P-nodes of type (0,0,0), i.e. k even
     z_vals_list: list[float] = []
@@ -711,20 +735,13 @@ def lebedev_B_on_z_axis(
     for k_r in range(0, Mz + 1, 2):
         if grid.P_idx[i0, j0, k_r] < 0:
             continue
+        z = float(grid.z[k_r])
 
-        contributions = []
-        for c in (C000, C101, C110, C011):
-            B_c = B_clusters[c]
-            t1, t2, t3 = _native_type_for_h_cluster_comp(c, comp)
-            # Build offset lists: 0 if parity matches i0/j0/k_r, else ±1
-            di_vals = [0] if t1 == i0 % 2 else [+1, -1]
-            dj_vals = [0] if t2 == j0 % 2 else [+1, -1]
-            dk_vals = [0] if t3 == k_r % 2 else [+1, -1]
-            vals = [b_at(B_c, i0 + di, j0 + dj, k_r + dk)
-                    for di in di_vals for dj in dj_vals for dk in dk_vals]
-            contributions.append(complex(np.mean(vals)))
-
-        z_vals_list.append(float(grid.z[k_r]))
+        contributions = [
+            interpolate_cluster_B(grid, B_clusters[c], c, comp, x0, y0, z)
+            for c in (C000, C101, C110, C011)
+        ]
+        z_vals_list.append(z)
         B_avg_list.append(complex(np.mean(contributions)))
 
     if not z_vals_list:
