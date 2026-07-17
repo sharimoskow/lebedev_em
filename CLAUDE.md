@@ -35,7 +35,9 @@ The second-order system for **E** (eq. 5):
 ∇ × [(μ^P)^{-1} ∇ × E^R] − iω σ̇^R E^R = iω J^R
 ```
 
-where σ̇ = σ + iω ε (complex conductivity).
+where σ̇ = σ − iω ε (complex conductivity; DDH03's printed "σ + iωε" after eq. 5 is
+inconsistent with their eq. 1 under the exp(−iωt) convention — deriving eq. 5 from
+eq. 4 forces σ̇ = σ − iωε, which is also what `analytics.py` uses).
 
 An equivalent dual system for **H** also exists (the key advantage of Lebedev over interpolation approaches).
 
@@ -224,7 +226,7 @@ A = C_PR @ INVMU_P @ C_RE - iω * SIGMADOT_R
 ```
 - `C_PR`: curl from P to R (adjoint/transpose of C_RE up to grid metric)  
 - `INVMU_P`: block-diagonal (3×3 blocks) of μ⁻¹ at P-nodes
-- `SIGMADOT_R`: block-diagonal (3×3 blocks) of σ̇ = σ + iωε at R-nodes
+- `SIGMADOT_R`: block-diagonal (3×3 blocks) of σ̇ = σ − iωε at R-nodes
 
 For **isotropic** media, INVMU_P and SIGMADOT_R are scalar multiples of identity → pure diagonal matrices.
 

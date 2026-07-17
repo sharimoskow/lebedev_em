@@ -133,25 +133,36 @@ class EMMedia:
 
     def sigma_dot_matrix(self, omega: float) -> sp.spmatrix:
         """
-        Return σ̇ = σ + iωε as a (3·N_R × 3·N_R) sparse matrix.
+        Return σ̇ = σ − iωε as a (3·N_R × 3·N_R) sparse matrix.
+
+        Sign convention: with the exp(−iωt) time dependence used throughout
+        (see analytics.py), the complex conductivity is σ̇ = σ − iωε.
+        (DDH03's printed "+iωε" in eq. 1 is a typo for this convention.)
 
         For isotropic media: block-diagonal with scalar entries.
         For anisotropic:     3×3 block-diagonal.
 
-        Note: checks sigma_R.ndim independently of mu_P so that a
-        scalar σ paired with a tensor μ (or vice-versa) is handled
-        correctly — the combined is_isotropic flag is not used here.
+        Handles every combination of scalar/tensor σ and ε.  Note: checks
+        sigma_R.ndim independently of mu_P so that a scalar σ paired with a
+        tensor μ (or vice-versa) is handled correctly — the combined
+        is_isotropic flag is not used here.
         """
-        if self.sigma_R.ndim == 1:
-            sigma_dot = self.sigma_R + 1j * omega * self.eps_R
+        # Promote eps to whichever representation sigma uses.
+        if self.sigma_R.ndim == 1 and self.eps_R.ndim == 1:
+            sigma_dot = self.sigma_R - 1j * omega * self.eps_R
             return scalar_diag(sigma_dot)
-        else:
-            # sigma_R is (N_R, 3, 3); eps_R is always (N_R,) scalar
-            eps_tensor = np.zeros((self.grid.N_R, 3, 3), dtype=complex)
+
+        # At least one of σ, ε is a tensor — assemble 3×3 blocks.
+        def _as_tensor(arr: np.ndarray) -> np.ndarray:
+            if arr.ndim == 3:
+                return arr
+            out = np.zeros((self.grid.N_R, 3, 3), dtype=complex)
             for d in range(3):
-                eps_tensor[:, d, d] = self.eps_R
-            sdot_tensors = self.sigma_R + 1j * omega * eps_tensor
-            return tensor_block_diag(sdot_tensors)
+                out[:, d, d] = arr
+            return out
+
+        sdot_tensors = _as_tensor(self.sigma_R) - 1j * omega * _as_tensor(self.eps_R)
+        return tensor_block_diag(sdot_tensors)
 
     def inv_mu_matrix(self) -> sp.spmatrix:
         """
@@ -604,7 +615,10 @@ def _nodal_eff_tensor_general(
     sigma_nn1 = complex(n_c @ s1 @ n_c)
     sigma_nn2 = complex(n_c @ s2 @ n_c)
 
-    # Guard against degenerate zero normal conductivity (fall back to arithmetic/harmonic).
+    # Guard against degenerate zero normal conductivity.  With σ_nn ≈ 0 the
+    # harmonic normal average (and the whole L̃ construction) is undefined, so
+    # fall back to the plain arithmetic volume average — the upper Wiener
+    # bound, which is the only well-defined limit in this degenerate case.
     if abs(sigma_nn1) < 1e-30 or abs(sigma_nn2) < 1e-30:
         sigma_arith = complex(f_vol) * s1 + complex(1.0 - f_vol) * s2
         return sigma_arith
@@ -939,7 +953,7 @@ def layered_isotropic(
     nodal_averaging : bool, default False
         If True, replace straddling dual cells using the *nodal*
         homogenization formula (Moskow et al. 1999).  For axis-aligned
-        interfaces this gives ΣD = diag(σ̄, σ̄, σ̃³) (see module docstring).
+        interfaces this gives ΣD = diag(σ̄, σ̄, σ̃) (see module docstring).
         Mutually exclusive with interface_averaging.
 
     Notes
@@ -1392,6 +1406,34 @@ def _estimate_normal_svd(
     return n_hat, planarity_ratio
 
 
+def _node_line_indices(
+    x_sub: np.ndarray,
+    y_sub: np.ndarray,
+    z_sub: np.ndarray,
+    node_xyz,
+) -> tuple[int, int, int]:
+    """
+    Sub-grid indices of the sample nearest the R-node along each axis.
+
+    The nodal line averages (tex note eqs. A.8-A.10) are 1-D integrals along
+    the grid axes *through the node*, with the transverse coordinates held
+    fixed at their node values.  On non-uniform (e.g. geometric) grids the
+    node is NOT at the centre of the dual-cell box [x_{i-1}, x_{i+1}], so the
+    box-centre index n//2 samples the wrong line.  Ties (node exactly midway
+    between two samples, as on uniform grids with an even sample count) are
+    broken toward the upper index, matching the previous n//2 convention so
+    uniform-grid results are unchanged.
+    """
+    def _near(arr: np.ndarray, v: float) -> int:
+        d = np.abs(np.asarray(arr, dtype=float) - float(v))
+        # last index attaining the minimum → upper index on exact ties
+        return int(len(d) - 1 - np.argmin(d[::-1]))
+
+    return (_near(x_sub, node_xyz[0]),
+            _near(y_sub, node_xyz[1]),
+            _near(z_sub, node_xyz[2]))
+
+
 def _pair_tols_svd(svals: np.ndarray, i: int, j: int):
     """
     Compute adaptive tolerances (tol_lo, tol_hi) for masked per-pair sub-SVD.
@@ -1512,10 +1554,19 @@ def _nodal_multimat_3d(
     is_tensor: bool,
     iso_tol: float,
     n_hat_combined: "np.ndarray | None",
+    node_xyz=None,
+    block_complex: "np.ndarray | None" = None,
 ) -> "np.ndarray | None":
     """
     Effective conductivity tensor for a dual cell containing exactly 3 distinct
     conductivity values.
+
+    *node_xyz* (optional) gives the physical R-node coordinates; per-axis
+    line fractions are then taken along the sub-grid lines through the node
+    (tex note eqs. A.8-A.10) rather than the box-centre lines.  *block_complex*
+    (optional) carries the complex σ̇ values matching *block* (which holds the
+    real part used for material classification); material conductivities are
+    read from it so the imaginary part survives the averaging.
 
     Uses masked per-pair sub-SVDs (:func:`_estimate_normal_svd_pair`) to
     identify the interface normals and decides between two strategies:
@@ -1545,15 +1596,24 @@ def _nodal_multimat_3d(
     if len(svals) != 3:
         return None
 
+    block_r = np.round(block, 6)
+
     def _get_sig(idx):
-        m = np.abs(np.round(block, 6) - svals[idx]) < 1e-5
+        m = np.abs(block_r - svals[idx]) < 1e-5
         if is_tensor and block_tensor is not None and m.any():
             return np.mean(block_tensor[m], axis=0)
+        if block_complex is not None and m.any():
+            # Complex-preserving: classification used the real part; the
+            # material value keeps its imaginary component.
+            return complex(np.mean(block_complex[m])) * np.eye(3, dtype=complex)
         return complex(svals[idx]) * np.eye(3, dtype=complex)
 
-    block_r = np.round(block, 6)
-    nb_x, nb_y, nb_z = block.shape
-    ic, jc, kc = nb_x // 2, nb_y // 2, nb_z // 2
+    # Line indices through the NODE (not the box centre) — see _node_line_indices.
+    if node_xyz is not None:
+        ic, jc, kc = _node_line_indices(x_sub, y_sub, z_sub, node_xyz)
+    else:
+        nb_x, nb_y, nb_z = block.shape
+        ic, jc, kc = nb_x // 2, nb_y // 2, nb_z // 2
 
     def _frac(idx):
         m = np.abs(block_r - svals[idx]) < 1e-5
@@ -1666,7 +1726,24 @@ def _nodal_multimat_3d(
 
     # Step 2 — homogenise inner (svals[1]) with sigma_outer using n̂_pri
     f1v, f1l = _frac(1)
-    return _nodal_eff_tensor_general(_get_sig(1), sigma_outer, f1v, f1l, n_pri)
+    result = _nodal_eff_tensor_general(_get_sig(1), sigma_outer, f1v, f1l, n_pri)
+
+    # ── Eigenvalue-overflow fallback (tex note §"Fallback") ────────────────────
+    # A physically valid homogenized tensor is bounded by the constituents:
+    # λ_max(ΣD) ≤ max_i λ_max(σ_i) ≤ max_i tr(σ_i) = 3 × max_i tr(σ_i)/3.
+    # An eigenvalue above 3× the largest material conductivity signals
+    # numerical degeneracy of the sequential result (typically a near-singular
+    # L̃ when one material has very low normal conductivity).  Returning None
+    # makes the caller fall back to the standard single-interface nodal path.
+    _sig_max = max(float(np.real(np.trace(_get_sig(i)))) / 3.0 for i in range(3))
+    try:
+        _herm = np.real(0.5 * (result + result.T))
+        _eig_max = float(np.max(np.linalg.eigvalsh(_herm)))
+    except Exception:
+        return None
+    if not np.all(np.isfinite(result)) or _eig_max > 3.0 * max(_sig_max, 1e-30):
+        return None
+    return result
 
 
 def _diag_d_from_block(
@@ -1999,8 +2076,10 @@ def from_sigma_func(
     sigma_func : callable
         ``sigma_func(X, Y, Z) -> ndarray``  where X, Y, Z are broadcastable
         arrays of the same shape and the return has the same shape.  Should
-        return real positive conductivity values (complex with positive real
-        part is also accepted).
+        return real positive conductivity values, or complex σ̇ with positive
+        real part — the imaginary part is preserved through all averaging;
+        only geometric decisions (interface-normal SVD, binarisation,
+        material classification) use the real part.
     h_svd : float or (float, float, float)
         Physical spacing [m] for the sub-grid used by the SVD interface-normal
         estimator.  Can be:
@@ -2034,9 +2113,10 @@ def from_sigma_func(
         Isotropy tolerance: cells whose diagonal entries agree within this
         relative tolerance are stored as scalars.
     svd_isotropy_tol : float
-        SVD planarity threshold: cells whose SVD confidence ratio s₂/s₁ ≥
-        this value are treated as uniform (no dominant interface direction)
-        and fall back to ``"diagonal"``.
+        SVD planarity threshold: cells whose SVD planarity ratio s₃/s₁
+        (smallest / largest singular value of the centred crossing-midpoint
+        positions) ≥ this value are treated as uniform (no dominant interface
+        direction) and fall back to ``"diagonal"``.
 
     Returns
     -------
@@ -2113,12 +2193,11 @@ def from_sigma_func(
         if _func_is_tensor:
             raw_vol_arr = np.asarray(raw_vol, dtype=complex)
             # Use trace/3 as scalar proxy for volume-average; full tensor
-            # filled later in Pass 1b (arithmetic) or Pass 2 (nodal/backus)
-            sig_vol = np.real(
-                np.trace(raw_vol_arr, axis1=-2, axis2=-1) / 3.0
-            ).astype(float)
+            # filled later in Pass 1b (arithmetic) or Pass 2 (nodal/backus).
+            # Kept complex so σ̇ = σ − iωε callables are not realified.
+            sig_vol = np.trace(raw_vol_arr, axis1=-2, axis2=-1) / 3.0
         else:
-            sig_vol = np.real(raw_vol).astype(float)
+            sig_vol = np.asarray(raw_vol, dtype=complex)
         sigma_R_scalar[seq] = complex(np.mean(sig_vol))
 
     # ------------------------------------------------------------------
@@ -2186,10 +2265,19 @@ def from_sigma_func(
         aniso = abs(s_xx - s_avg) + abs(s_yy - s_avg) + abs(s_zz - s_avg)
         if aniso < iso_tol * abs(s_avg) + 1e-300:
             return False
+        # SPD guard: per-axis effective conductivities must have positive
+        # real part; otherwise keep the existing (pointwise) value.
+        if min(complex(s_xx).real, complex(s_yy).real, complex(s_zz).real) <= 0.0:
+            return False
         _alloc_tensor_if_needed()
-        sigma_R_tensor[seq, 0, 0] = s_xx
-        sigma_R_tensor[seq, 1, 1] = s_yy
-        sigma_R_tensor[seq, 2, 2] = s_zz
+        # Replace the WHOLE tensor, zeroing off-diagonals.  For tensor-valued
+        # callables the array is pre-seeded with pointwise tensors; mixing a
+        # scalar-proxy diagonal with the pointwise off-diagonals can produce
+        # an indefinite matrix (e.g. large σ_xy with reduced σ_xx, σ_yy).
+        # A positive diagonal tensor is SPD by construction.
+        sigma_R_tensor[seq] = np.diag(
+            np.array([s_xx, s_yy, s_zz], dtype=complex)
+        )
         return True
 
     if method in ("diagonal", "backus", "nodal"):
@@ -2233,7 +2321,8 @@ def from_sigma_func(
                 yv = np.linspace(y_lo, y_hi, n_vol)
                 zv = np.linspace(z_lo, z_hi, n_vol)
                 XV, YV, ZV = np.meshgrid(xv, yv, zv, indexing="ij")
-                sig_vol = np.real(sigma_func(XV, YV, ZV)).astype(float)
+                # Complex-preserving: averages act on the full σ̇ values.
+                sig_vol = np.asarray(sigma_func(XV, YV, ZV), dtype=complex)
                 inv_vol = 1.0 / sig_vol
                 s_xx = complex(np.mean(1.0 / np.mean(inv_vol, axis=0)))
                 s_yy = complex(np.mean(1.0 / np.mean(inv_vol, axis=1)))
@@ -2265,21 +2354,23 @@ def from_sigma_func(
             _raw_svd = sigma_func(XS, YS, ZS)
             if _func_is_tensor:
                 _block_tensor_svd = np.asarray(_raw_svd, dtype=complex)
-                # scalar proxy = trace/3 for SVD and volume averages
-                block_svd = np.real(
-                    np.trace(_block_tensor_svd, axis1=-2, axis2=-1) / 3.0
-                ).astype(float)
+                _block_c = np.trace(_block_tensor_svd, axis1=-2, axis2=-1) / 3.0
+                # Real scalar proxy for geometric decisions only (SVD normal
+                # estimation, binarisation, material classification).
+                block_svd = np.real(_block_c).astype(float)
             else:
                 _block_tensor_svd = None
-                block_svd = np.real(_raw_svd).astype(float)
+                _block_c = np.asarray(_raw_svd, dtype=complex)
+                block_svd = np.real(_block_c).astype(float)
 
             # Volume averages from the fine isotropic SVD grid — more accurate
             # for thin-sliver cells than the coarse n_vol³ quadrature.
-            sigma_arith   = complex(np.mean(block_svd))
-            inv_sigma_vol = complex(np.mean(1.0 / block_svd))
+            # Complex-preserving: computed from _block_c, not the real proxy.
+            sigma_arith   = complex(np.mean(_block_c))
+            inv_sigma_vol = complex(np.mean(1.0 / _block_c))
 
             # Diagonal per-axis effective conductivities from SVD block
-            inv_svd = 1.0 / block_svd
+            inv_svd = 1.0 / _block_c
             s_xx = complex(np.mean(1.0 / np.mean(inv_svd, axis=0)))
             s_yy = complex(np.mean(1.0 / np.mean(inv_svd, axis=1)))
             s_zz = complex(np.mean(1.0 / np.mean(inv_svd, axis=2)))
@@ -2299,6 +2390,8 @@ def from_sigma_func(
                         _block_tensor_svd, _func_is_tensor, svd_isotropy_tol,
                         n_hat if (n_hat is not None and svd_ratio < svd_isotropy_tol)
                              else None,
+                        node_xyz=(x_node, y_node, z_node),
+                        block_complex=None if _func_is_tensor else _block_c,
                     )
                     if _t_mm is not None:
                         _alloc_tensor_if_needed()
@@ -2327,14 +2420,32 @@ def from_sigma_func(
                         # Uniform block — fall through to diagonal below
                         _set_diagonal(seq, s_xx, s_yy, s_zz)
                         continue
-                    # Volume fraction and per-axis line fractions of region 1
+                    # Volume fraction and per-axis line fractions of region 1.
+                    # Line fractions along the lines through the NODE (tex
+                    # eqs. A.8-A.10): the transverse coordinates are held at
+                    # their node values — the box centre differs from the node
+                    # on non-uniform grids.  Evaluate the callable directly on
+                    # n_line points per axis (same resolution as the scalar
+                    # path) rather than using the coarser SVD-block voxel
+                    # lines.
                     _f_vol = float(_mask1.mean())
-                    _nx_b, _ny_b, _nz_b = block_svd.shape
-                    _ic, _jc, _kc = _nx_b // 2, _ny_b // 2, _nz_b // 2
+                    _xl = np.linspace(x_lo, x_hi, n_line)
+                    _yl = np.linspace(y_lo, y_hi, n_line)
+                    _zl = np.linspace(z_lo, z_hi, n_line)
+
+                    def _line_frac1(lx, ly, lz):
+                        _tr = np.real(np.trace(
+                            np.asarray(sigma_func(lx, ly, lz), dtype=complex),
+                            axis1=-2, axis2=-1)) / 3.0
+                        return float(np.mean(_tr < _sig_mid))
+
                     _f_line = np.array([
-                        float(_mask1[:, _jc, _kc].mean()),   # x-axis line
-                        float(_mask1[_ic, :, _kc].mean()),   # y-axis line
-                        float(_mask1[_ic, _jc, :].mean()),   # z-axis line
+                        _line_frac1(_xl, np.full(n_line, y_node),
+                                    np.full(n_line, z_node)),   # x-axis line
+                        _line_frac1(np.full(n_line, x_node), _yl,
+                                    np.full(n_line, z_node)),   # y-axis line
+                        _line_frac1(np.full(n_line, x_node),
+                                    np.full(n_line, y_node), _zl),  # z-axis line
                     ])
                     t = _nodal_eff_tensor_general(
                         _s1, _s2, _f_vol, _f_line, n_hat)
@@ -2344,21 +2455,22 @@ def from_sigma_func(
                     yl = np.linspace(y_lo, y_hi, n_line)
                     zl = np.linspace(z_lo, z_hi, n_line)
 
-                    sig_x = np.real(sigma_func(
+                    # Complex-preserving line averages of 1/σ̇ through the node.
+                    sig_x = np.asarray(sigma_func(
                         xl,
                         np.full(n_line, y_node),
                         np.full(n_line, z_node),
-                    )).astype(float)
-                    sig_y = np.real(sigma_func(
+                    ), dtype=complex)
+                    sig_y = np.asarray(sigma_func(
                         np.full(n_line, x_node),
                         yl,
                         np.full(n_line, z_node),
-                    )).astype(float)
-                    sig_z = np.real(sigma_func(
+                    ), dtype=complex)
+                    sig_z = np.asarray(sigma_func(
                         np.full(n_line, x_node),
                         np.full(n_line, y_node),
                         zl,
-                    )).astype(float)
+                    ), dtype=complex)
 
                     D_diag = np.array([
                         complex(np.mean(1.0 / sig_x)),
@@ -2391,10 +2503,19 @@ def _nodal_from_normals(
     normals: list,
     block_tensor,
     is_tensor: bool,
+    node_xyz=None,
+    block_complex: "np.ndarray | None" = None,
 ) -> np.ndarray:
     """
     Nodal effective tensor for a multi-interface cell given analytically known
     interface normals (no SVD needed).
+
+    *node_xyz* (optional) gives the physical R-node coordinates so that
+    per-axis line fractions are taken along the sub-grid lines through the
+    node (tex note eqs. A.8-A.10) instead of the box-centre lines — these
+    differ on non-uniform grids.  *block_complex* (optional) carries complex
+    σ̇ values matching *block* (real part, used for classification); material
+    conductivities are read from it to preserve the imaginary part.
 
     Parameters
     ----------
@@ -2430,17 +2551,23 @@ def _nodal_from_normals(
     normal conductivity and dominates G_nn), the sequential-Backus result is
     discarded and the fallback 2-material path is used instead.
     """
-    nb_x, nb_y, nb_z = block.shape
-    ic, jc, kc = nb_x // 2, nb_y // 2, nb_z // 2
+    # Line indices through the NODE (not the box centre) — see _node_line_indices.
+    if node_xyz is not None:
+        ic, jc, kc = _node_line_indices(x_sub, y_sub, z_sub, node_xyz)
+    else:
+        nb_x, nb_y, nb_z = block.shape
+        ic, jc, kc = nb_x // 2, nb_y // 2, nb_z // 2
     block_r = np.round(block, 6)
     svals = np.sort(np.unique(block_r))
 
     def _sig_region(mask):
         """Mean sigma tensor (or scalar*I) over the voxels in mask."""
         if not mask.any():
-            return complex(block_r[mask.argmax()]) * np.eye(3, dtype=complex)
+            return complex(block_r.flat[0]) * np.eye(3, dtype=complex)
         if is_tensor and block_tensor is not None:
             return np.mean(block_tensor[mask], axis=0)
+        if block_complex is not None:
+            return complex(np.mean(block_complex[mask])) * np.eye(3, dtype=complex)
         return complex(np.mean(block_r[mask])) * np.eye(3, dtype=complex)
 
     def _frac_of_mask_in_region(region_mask, total_mask):
@@ -2471,7 +2598,10 @@ def _nodal_from_normals(
         fv, fl = _frac_of_mask_in_region(mask1, np.ones(block.shape, dtype=bool))
         # Choose the normal that maximises mean-projection separation
         XX2, YY2, ZZ2 = np.meshgrid(x_sub, y_sub, z_sub, indexing="ij")
-        node_pos2 = np.array([XX2[ic, jc, kc], YY2[ic, jc, kc], ZZ2[ic, jc, kc]])
+        if node_xyz is not None:
+            node_pos2 = np.asarray(node_xyz, dtype=float)
+        else:
+            node_pos2 = np.array([XX2[ic, jc, kc], YY2[ic, jc, kc], ZZ2[ic, jc, kc]])
         best_n = np.asarray(normals[0], dtype=float)
         best_n /= max(np.linalg.norm(best_n), 1e-14)
         best_score = -1.0
@@ -2513,7 +2643,10 @@ def _nodal_from_normals(
     #   Step 2 — homogenise the inner material against σ_outer with n_inner
 
     XX, YY, ZZ = np.meshgrid(x_sub, y_sub, z_sub, indexing="ij")
-    node_pos = np.array([XX[ic, jc, kc], YY[ic, jc, kc], ZZ[ic, jc, kc]])
+    if node_xyz is not None:
+        node_pos = np.asarray(node_xyz, dtype=float)
+    else:
+        node_pos = np.array([XX[ic, jc, kc], YY[ic, jc, kc], ZZ[ic, jc, kc]])
 
     def _mask_of(sv):
         return np.abs(block_r - sv) < 1e-5
@@ -2522,6 +2655,8 @@ def _nodal_from_normals(
         m = _mask_of(sv)
         if is_tensor and block_tensor is not None and m.any():
             return np.mean(block_tensor[m], axis=0)
+        if block_complex is not None and m.any():
+            return complex(np.mean(block_complex[m])) * np.eye(3, dtype=complex)
         return complex(sv) * np.eye(3, dtype=complex)
 
     def _vol_lf(m):
@@ -2594,7 +2729,26 @@ def _nodal_from_normals(
         else:
             # Step 2: combine inner material with sigma_outer across n_inner
             f1v, f1l = _vol_lf(m1)
-            return _nodal_eff_tensor_general(_sig_of(sv_inner), sigma_outer, f1v, f1l, n_inner)
+            result = _nodal_eff_tensor_general(
+                _sig_of(sv_inner), sigma_outer, f1v, f1l, n_inner)
+
+            # Eigenvalue-overflow fallback on the FINAL sequential result
+            # (tex note §"Fallback"): a valid homogenized tensor satisfies
+            # λ_max(ΣD) ≤ max_i λ_max(σ_i) ≤ 3 × max_i tr(σ_i)/3.  Beyond
+            # that the sequential combination is numerically degenerate —
+            # use the single-interface 2-material fallback below instead.
+            _sig_all_max = max(
+                float(np.real(np.trace(_sig_of(sv)))) / 3.0
+                for sv in (sv_out0, sv_inner, sv_out1))
+            try:
+                _emax_fin = float(np.max(np.linalg.eigvalsh(
+                    np.real(0.5 * (result + result.T)))))
+            except Exception:
+                _emax_fin = float("inf")
+            if (np.all(np.isfinite(result))
+                    and _emax_fin <= _OUTER_OVERFLOW_TOL * max(_sig_all_max, 1e-30)):
+                return result
+            # else: fall through to the 2-material fallback below
 
     # ── Fallback: 2-material treatment with best-matching normal ─────────────
     # Reached when:
@@ -2773,33 +2927,38 @@ def from_geometry_func(
             sigma_func(_X, _Y, _Z), dtype=complex
         ).reshape(N_R, 3, 3)
 
+    # ── Pass 1 — pointwise σ for EVERY R-node ─────────────────────────────────
+    # This must complete before any tensor allocation: _alloc_tensor_if_needed
+    # seeds the tensor diagonal by copying sigma_R_scalar, so a mid-loop
+    # allocation over a partially-filled array would leave uninitialised
+    # (garbage/zero) diagonals for all not-yet-visited uniform nodes.
+    # (Same two-pass discipline as from_sigma_func.)
     sigma_R_scalar = np.empty(N_R, dtype=complex)
+    if _func_is_tensor:
+        # sigma_R_tensor already holds pointwise tensors for all nodes.
+        sigma_R_scalar[:] = np.trace(sigma_R_tensor, axis1=-2, axis2=-1) / 3.0
+    else:
+        _Xn = np.array([float(x_fd[i]) for i, j, k in grid.R_nodes], dtype=float)
+        _Yn = np.array([float(y_fd[j]) for i, j, k in grid.R_nodes], dtype=float)
+        _Zn = np.array([float(z_fd[k]) for i, j, k in grid.R_nodes], dtype=float)
+        sigma_R_scalar[:] = np.asarray(
+            sigma_func(_Xn, _Yn, _Zn), dtype=complex
+        ).reshape(N_R)
 
     def _alloc_tensor_if_needed():
         nonlocal sigma_R_tensor
         if sigma_R_tensor is None:
+            # sigma_R_scalar is fully populated (Pass 1) — safe to copy.
             sigma_R_tensor = np.zeros((N_R, 3, 3), dtype=complex)
             for d in range(3):
                 sigma_R_tensor[:, d, d] = sigma_R_scalar
 
-    # ── Main loop ─────────────────────────────────────────────────────────────
+    # ── Pass 2 — interface averaging loop ─────────────────────────────────────
     for seq, (i, j, k) in enumerate(grid.R_nodes):
         x_node = float(x_fd[i])
         y_node = float(y_fd[j])
         z_node = float(z_fd[k])
         node   = np.array([x_node, y_node, z_node])
-
-        # Pointwise sigma (scalar proxy for tensor callables)
-        _pw = sigma_func(
-            np.array([[[x_node]]]),
-            np.array([[[y_node]]]),
-            np.array([[[z_node]]]),
-        )
-        _pw_arr = np.asarray(_pw, dtype=complex)
-        if _func_is_tensor:
-            sigma_R_scalar[seq] = complex(np.trace(_pw_arr.reshape(3, 3)) / 3.0)
-        else:
-            sigma_R_scalar[seq] = complex(np.ravel(_pw_arr)[0])
 
         x_lo = float(x_fd[max(i - 1, 0)])
         x_hi = float(x_fd[min(i + 1, len(x_fd) - 1)])
@@ -2850,12 +3009,15 @@ def from_geometry_func(
 
         if _func_is_tensor:
             _block_tensor = np.asarray(_raw, dtype=complex)
+            _block_c = None
             block_svd = np.real(
                 np.trace(_block_tensor, axis1=-2, axis2=-1) / 3.0
             ).astype(float)
         else:
             _block_tensor = None
-            block_svd = np.real(_raw).astype(float)
+            # Complex block for averaging; real proxy for classification.
+            _block_c  = np.asarray(_raw, dtype=complex)
+            block_svd = np.real(_block_c).astype(float)
 
         # Check if block is actually uniform (interface_func may have been
         # over-eager — e.g. corner-only straddle with no real crossing).
@@ -2867,6 +3029,8 @@ def from_geometry_func(
             t = _nodal_from_normals(
                 block_svd, x_svd, y_svd, z_svd,
                 normals_list, _block_tensor, _func_is_tensor,
+                node_xyz=(x_node, y_node, z_node),
+                block_complex=_block_c,
             )
         except Exception:
             if svd_fallback:
@@ -2886,8 +3050,14 @@ def from_geometry_func(
         off_diag_norm = np.linalg.norm(t - np.diag(t_diag))
         aniso  = abs(t_diag - t_avg).sum() + off_diag_norm
         if aniso < iso_tol * abs(t_avg) + 1e-300:
-            # Effectively isotropic — store as scalar
+            # Effectively isotropic — write through to BOTH representations.
+            # The returned array is sigma_R_tensor whenever it is allocated
+            # (always, for tensor callables; from the first anisotropic cell
+            # onward, for scalar ones), so updating only the scalar array
+            # would silently discard the homogenized value.
             sigma_R_scalar[seq] = t_avg
+            if sigma_R_tensor is not None:
+                sigma_R_tensor[seq] = t_avg * np.eye(3, dtype=complex)
             continue
 
         _alloc_tensor_if_needed()

@@ -49,6 +49,13 @@ import numpy as np
 from typing import Callable
 
 
+def _min_dist_interval_to_zero(lo: float, hi: float) -> float:
+    """Distance from the point 0 to the interval [lo, hi] (0 if it contains 0)."""
+    if lo <= 0.0 <= hi:
+        return 0.0
+    return min(abs(lo), abs(hi))
+
+
 # ---------------------------------------------------------------------------
 # Boundary primitives
 # ---------------------------------------------------------------------------
@@ -120,13 +127,28 @@ class CylindricalBoundary:
                   bmin: np.ndarray,
                   bmax: np.ndarray,
                   node: np.ndarray) -> bool:
-        """Return True if the dual cell [bmin, bmax] straddles this cylinder."""
+        """
+        Return True if the dual cell [bmin, bmax] straddles this cylinder.
+
+        The maximum of r(x, y) over the box is attained at a corner (r is
+        convex), but the minimum is generally attained in the interior or on
+        an edge, so it must be computed as the clamped closest-point distance
+        from the cylinder axis to the box footprint.  Using min-over-corners
+        misses cells whose closest approach to the axis is interior — e.g. a
+        cell containing the whole borehole, or one that spans x = 0 or y = 0
+        near the wall.
+        """
         r_corners = [
             (cx ** 2 + cy ** 2) ** 0.5
             for cx in (bmin[0], bmax[0])
             for cy in (bmin[1], bmax[1])
         ]
-        return min(r_corners) < self.radius <= max(r_corners)
+        r_max = max(r_corners)
+        # Clamped closest-point distance from the axis (x=y=0) to the box.
+        dx = _min_dist_interval_to_zero(float(bmin[0]), float(bmax[0]))
+        dy = _min_dist_interval_to_zero(float(bmin[1]), float(bmax[1]))
+        r_min = (dx ** 2 + dy ** 2) ** 0.5
+        return r_min < self.radius <= r_max
 
     def normal_at(self, node: np.ndarray) -> np.ndarray:
         """Return the outward radial unit normal at *node*."""
@@ -158,13 +180,25 @@ class SphericalBoundary:
                   bmin: np.ndarray,
                   bmax: np.ndarray,
                   node: np.ndarray) -> bool:
+        """
+        Return True if the dual cell [bmin, bmax] straddles this sphere.
+
+        As for :class:`CylindricalBoundary`, the max of |x| over the box is
+        at a corner but the min is the clamped closest-point distance from
+        the sphere centre (origin) to the box.
+        """
         r_corners = [
             (cx ** 2 + cy ** 2 + cz ** 2) ** 0.5
             for cx in (bmin[0], bmax[0])
             for cy in (bmin[1], bmax[1])
             for cz in (bmin[2], bmax[2])
         ]
-        return min(r_corners) < self.radius <= max(r_corners)
+        r_max = max(r_corners)
+        dx = _min_dist_interval_to_zero(float(bmin[0]), float(bmax[0]))
+        dy = _min_dist_interval_to_zero(float(bmin[1]), float(bmax[1]))
+        dz = _min_dist_interval_to_zero(float(bmin[2]), float(bmax[2]))
+        r_min = (dx ** 2 + dy ** 2 + dz ** 2) ** 0.5
+        return r_min < self.radius <= r_max
 
     def normal_at(self, node: np.ndarray) -> np.ndarray:
         r = float(np.linalg.norm(node))
