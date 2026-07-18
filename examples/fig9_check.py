@@ -1,8 +1,10 @@
 """
 fig9_check.py — Reproduce DDH03 Fig. 9 (thin dipping resistive layer) as an
-absolute-calibration test: the paper's "no layer" curve is verified against the
-unit-moment analytic (ratio 0.92-0.99), so matching/missing the paper here
-cleanly separates "our heterogeneous machinery" from "Fig-7-specific issues".
+absolutely calibrated benchmark: the paper's "no layer" curve agrees with the
+unit-moment homogeneous analytic solution to within 1-8% (the near-source
+deficit being the borehole's local reduction), so the published figure is in
+absolute SI units per unit dipole moment and the comparison involves no free
+scale.
 
 Model (DDH03 Fig. 8): background sigma=0.1; borehole sigma=0.05 R=0.1 m;
 invasion sigma=0.1 R=0.6 m (same as background); thin 75-degree dipping layer,

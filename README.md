@@ -110,18 +110,9 @@ fitted constants):
   python examples/fig9_check.py extract
   ```
 
-**Work in progress:** the DDH03 Figs. 6–7 deviated-borehole model
-(borehole + invasion + 60° dipping anisotropic half-space). The full-method
-runner is `examples/fig7_full_ddh03.py`; it reproduces the published curve
-*shapes* precisely but not yet the amplitudes (flat offsets ×1.8 in B_xx and
-×2.7 in B_xz, localized to the invasion-zone treatment by
-`examples/fig7_variants.py`). `examples/plot_ddh03_fig7.py` is a
-k-self-consistency test only — see its docstring before comparing its output
-to the paper.
+## Deviated-borehole model example (media-building strategies)
 
-## DDH03 model example (media-building strategies)
-
-The `examples/` directory also exercises the DDH03 deviated-borehole model
+The `examples/` directory also exercises a deviated-borehole model
 with different media builders: bore (r < 0.1 m, σ = 0.05 S/m), invasion zone
 (0.1 < r < 0.6 m, σ = 0.10 S/m), and a dipping anisotropic formation
 (60° dip; σ_T = 0.10 S/m, σ_N = 0.01 S/m below dip; σ = 0.50 S/m above dip).
