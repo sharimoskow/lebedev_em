@@ -21,7 +21,7 @@ $G$ is an energy matrix built from volume averages of the medium. For an
 isotropic profile the ingredients are
 $\widetilde{L} = [\hat{\boldsymbol{m}}\mid\hat{\boldsymbol{q}}\mid D\hat{\boldsymbol{n}}]$,
 with $D$ a diagonal matrix of per-axis line averages of $\sigma^{-1}$, and
-$G = \operatorname{diag}(\bar\sigma,\bar\sigma,\langle\sigma^{-1}\rangle_{\mathrm{vol}})$.
+$G = \mathrm{diag}(\bar\sigma,\bar\sigma,\langle\sigma^{-1}\rangle_{\mathrm{vol}})$.
 For a tensor-valued profile, the columns of $\widetilde{L}$ acquire
 off-diagonal corrections from the off-normal conductivity components, and the
 upper-left block of $G$ is replaced by the volume average of the pointwise
@@ -35,7 +35,7 @@ is available, $\hat{\boldsymbol{n}}$ is estimated by fitting a plane to
 interface-crossing voxel midpoints on a fine sub-grid (geometric SVD); a
 planarity ratio detects unreliable estimates and triggers a diagonal
 fallback. For tensor-valued callables the SVD uses
-$\tfrac{1}{3}\operatorname{tr}\sigma$ as a scalar proxy.
+$\tfrac{1}{3}\mathrm{tr}\sigma$ as a scalar proxy.
 
 Dual cells straddling two interfaces are handled by sequential nodal
 homogenization: the two outer materials are homogenized first with the outer
@@ -72,7 +72,7 @@ exactly at every level set of $\hat{\boldsymbol{n}}\cdot\boldsymbol{x}$: the
 tangential electric field and the normal current density are both constant in
 the $\hat{\boldsymbol{n}}$ direction. This motivates the local solution space
 
-$$L(H) = \operatorname{span}\bigl\{1,\;\hat{\boldsymbol{m}}\cdot\boldsymbol{x},\;\hat{\boldsymbol{q}}\cdot\boldsymbol{x},\;\varphi_n(\boldsymbol{x})\bigr\},$$
+$$L(H) = \mathrm{span}\bigl\{1,\;\hat{\boldsymbol{m}}\cdot\boldsymbol{x},\;\hat{\boldsymbol{q}}\cdot\boldsymbol{x},\;\varphi_n(\boldsymbol{x})\bigr\},$$
 
 where
 
@@ -120,7 +120,7 @@ $d_k = \sum_j f_k^{(j)}/\sigma_j$.
 
 Assembling all three components, the discrete gradient is
 
-$$\widetilde{\nabla}\phi = a_1\,\hat{\boldsymbol{m}} + a_2\,\hat{\boldsymbol{q}} + a_3\,D\hat{\boldsymbol{n}}, \qquad D = \operatorname{diag}(d_1,d_2,d_3), \tag{4}$$
+$$\widetilde{\nabla}\phi = a_1\,\hat{\boldsymbol{m}} + a_2\,\hat{\boldsymbol{q}} + a_3\,D\hat{\boldsymbol{n}}, \qquad D = \mathrm{diag}(d_1,d_2,d_3), \tag{4}$$
 
 or in matrix form
 
@@ -144,7 +144,7 @@ $$\int_H \nabla\phi\cdot\sigma\nabla\psi\;dV = |H|\bigl(\bar\sigma\,(a_1 b_1+a_2
 
 where
 
-$$G = \operatorname{diag}\bigl(\bar\sigma,\;\bar\sigma,\;\langle\sigma^{-1}\rangle_{\mathrm{vol}}\bigr), \tag{6}$$
+$$G = \mathrm{diag}\bigl(\bar\sigma,\;\bar\sigma,\;\langle\sigma^{-1}\rangle_{\mathrm{vol}}\bigr), \tag{6}$$
 
 with
 
@@ -168,7 +168,7 @@ $$|H|\;\widetilde{\nabla}\phi\cdot\Sigma_D\,\widetilde{\nabla}\psi = |H|\;\bolds
 gives $\widetilde{L}^\top\Sigma_D\,\widetilde{L} = G$, and solving for
 $\Sigma_D$:
 
-$$\boxed{\;\Sigma_D = \widetilde{L}^{-\top}\,G\,\widetilde{L}^{-1}, \qquad \widetilde{L} = [\hat{\boldsymbol{m}}\mid\hat{\boldsymbol{q}}\mid D\hat{\boldsymbol{n}}], \qquad G = \operatorname{diag}\bigl(\bar\sigma,\;\bar\sigma,\;\langle\sigma^{-1}\rangle_{\mathrm{vol}}\bigr).\;} \tag{7}$$
+$$\boxed{\;\Sigma_D = \widetilde{L}^{-\top}\,G\,\widetilde{L}^{-1}, \qquad \widetilde{L} = [\hat{\boldsymbol{m}}\mid\hat{\boldsymbol{q}}\mid D\hat{\boldsymbol{n}}], \qquad G = \mathrm{diag}\bigl(\bar\sigma,\;\bar\sigma,\;\langle\sigma^{-1}\rangle_{\mathrm{vol}}\bigr).\;} \tag{7}$$
 
 Here $\widetilde{L}^{-\top} := (\widetilde{L}^\top)^{-1} = (\widetilde{L}^{-1})^\top$.
 
@@ -178,12 +178,12 @@ Here $\widetilde{L}^{-\top} := (\widetilde{L}^\top)^{-1} = (\widetilde{L}^{-1})^
 $\hat{\boldsymbol{n}} = \hat{\boldsymbol{e}}_3$, formula (7) reduces to the
 standard arithmetic/harmonic tensor*
 
-$$\Sigma_D = \operatorname{diag}(\bar\sigma,\;\bar\sigma,\;\widetilde\sigma).$$
+$$\Sigma_D = \mathrm{diag}(\bar\sigma,\;\bar\sigma,\;\widetilde\sigma).$$
 
 *Proof.* Choose $\hat{\boldsymbol{m}}=\hat{\boldsymbol{e}}_1$,
 $\hat{\boldsymbol{q}}=\hat{\boldsymbol{e}}_2$. Then
 $D\hat{\boldsymbol{n}} = d_3\hat{\boldsymbol{e}}_3$ and
-$\widetilde{L} = \operatorname{diag}(1,1,d_3)$. Since
+$\widetilde{L} = \mathrm{diag}(1,1,d_3)$. Since
 $\hat{\boldsymbol{n}} = \hat{\boldsymbol{e}}_3$, lines along
 $\hat{\boldsymbol{e}}_1$ and $\hat{\boldsymbol{e}}_2$ are parallel to all
 level sets of $\sigma$, so $d_1 = d_2$ each equal the pointwise value
@@ -193,9 +193,9 @@ giving
 $d_3 = \langle\sigma^{-1}\rangle_z = \langle\sigma^{-1}\rangle_{\mathrm{vol}} = 1/\widetilde\sigma$
 (the line average along $z$ equals the volume average when the profile
 depends only on $z$). Therefore
-$\widetilde{L}^{-1} = \operatorname{diag}(1,1,\widetilde\sigma)$, and
+$\widetilde{L}^{-1} = \mathrm{diag}(1,1,\widetilde\sigma)$, and
 
-$$\Sigma_D = \operatorname{diag}(1,1,\widetilde\sigma)\cdot \operatorname{diag}(\bar\sigma,\bar\sigma,1/\widetilde\sigma)\cdot \operatorname{diag}(1,1,\widetilde\sigma) = \operatorname{diag}(\bar\sigma,\;\bar\sigma,\;\widetilde\sigma). \qquad\blacksquare$$
+$$\Sigma_D = \mathrm{diag}(1,1,\widetilde\sigma)\cdot \mathrm{diag}(\bar\sigma,\bar\sigma,1/\widetilde\sigma)\cdot \mathrm{diag}(1,1,\widetilde\sigma) = \mathrm{diag}(\bar\sigma,\;\bar\sigma,\;\widetilde\sigma). \qquad\blacksquare$$
 
 **Lemma 2 (Symmetric straddling).** *If $D\hat{\boldsymbol{n}}$ is parallel
 to $\hat{\boldsymbol{n}}$ (i.e. $D = d\,I$ for some scalar $d$), then*
@@ -211,7 +211,7 @@ $\hat{\boldsymbol{n}}^\top/d$, giving
 $\widetilde{L}^{-\top} = [\hat{\boldsymbol{m}}\mid\hat{\boldsymbol{q}}\mid\hat{\boldsymbol{n}}/d]$.
 Then
 
-$$\Sigma_D = [\hat{\boldsymbol{m}}\mid\hat{\boldsymbol{q}}\mid\hat{\boldsymbol{n}}/d]\,\operatorname{diag}(\bar\sigma,\bar\sigma,1/\widetilde\sigma) \begin{pmatrix}\hat{\boldsymbol{m}}^\top\\ \hat{\boldsymbol{q}}^\top\\ \hat{\boldsymbol{n}}^\top/d\end{pmatrix} = \bar\sigma\,\hat{\boldsymbol{m}}\hat{\boldsymbol{m}}^\top + \bar\sigma\,\hat{\boldsymbol{q}}\hat{\boldsymbol{q}}^\top + \frac{1}{\widetilde\sigma d^2}\,\hat{\boldsymbol{n}}\hat{\boldsymbol{n}}^\top.$$
+$$\Sigma_D = [\hat{\boldsymbol{m}}\mid\hat{\boldsymbol{q}}\mid\hat{\boldsymbol{n}}/d]\,\mathrm{diag}(\bar\sigma,\bar\sigma,1/\widetilde\sigma) \begin{pmatrix}\hat{\boldsymbol{m}}^\top\\ \hat{\boldsymbol{q}}^\top\\ \hat{\boldsymbol{n}}^\top/d\end{pmatrix} = \bar\sigma\,\hat{\boldsymbol{m}}\hat{\boldsymbol{m}}^\top + \bar\sigma\,\hat{\boldsymbol{q}}\hat{\boldsymbol{q}}^\top + \frac{1}{\widetilde\sigma d^2}\,\hat{\boldsymbol{n}}\hat{\boldsymbol{n}}^\top.$$
 
 Since $d = 1/\widetilde\sigma$ (the line average equals the volume average
 when $D\propto I$), the last coefficient equals $\widetilde\sigma$, and
@@ -236,7 +236,7 @@ the tensor
 $$\Sigma_D^{(2)} = K\,\Sigma_L^{(2)}\,K^\top,\qquad K = L^{-1},$$
 
 where $L$ is a $2\times2$ matrix (their eq. (A.21)) and
-$\Sigma_L^{(2)} = \operatorname{diag}(\bar\sigma,\widetilde\sigma)$ in the
+$\Sigma_L^{(2)} = \mathrm{diag}(\bar\sigma,\widetilde\sigma)$ in the
 $(\hat{\boldsymbol{m}},\hat{\boldsymbol{n}})$ basis.
 
 In 3D the same energy-matching argument gives an identical structure. The
@@ -410,9 +410,9 @@ $\Sigma_D = \widetilde{L}^{-\top}\,G\,\widetilde{L}^{-1}$ with:
 
 | Quantity | Definition | Meaning |
 |---|---|---|
-| $D$ | $\operatorname{diag}(d_1,d_2,d_3)$, $\;d_k = \frac{1}{\Delta x_k}\int_{x_k^-}^{x_k^+} \frac{dx_k}{\sigma(\hat{\boldsymbol{n}}\cdot\boldsymbol{x})}$ | per-axis line avg of $\sigma^{-1}$ |
+| $D$ | $\mathrm{diag}(d_1,d_2,d_3)$, $\;d_k = \frac{1}{\Delta x_k}\int_{x_k^-}^{x_k^+} \frac{dx_k}{\sigma(\hat{\boldsymbol{n}}\cdot\boldsymbol{x})}$ | per-axis line avg of $\sigma^{-1}$ |
 | $\widetilde{L}$ | $[\hat{\boldsymbol{m}}\mid\hat{\boldsymbol{q}}\mid D\hat{\boldsymbol{n}}]$, with $\hat{\boldsymbol{m}},\hat{\boldsymbol{q}}\perp\hat{\boldsymbol{n}}$ orthonormal | discrete-gradient map |
-| $G$ | $\operatorname{diag}(\bar\sigma,\bar\sigma,\langle\sigma^{-1}\rangle_{\mathrm{vol}})$ | energy matrix |
+| $G$ | $\mathrm{diag}(\bar\sigma,\bar\sigma,\langle\sigma^{-1}\rangle_{\mathrm{vol}})$ | energy matrix |
 | $\bar\sigma$ | $\frac{1}{\|H\|}\int_H \sigma\,dV$ | volume avg of $\sigma$ |
 | $\langle\sigma^{-1}\rangle_{\mathrm{vol}}$ | $\frac{1}{\|H\|}\int_H \sigma^{-1}\,dV$ | volume avg of $\sigma^{-1}$ |
 
@@ -467,7 +467,7 @@ directions eliminates sampling-induced bias in the SVD step. The same block
 is reused for normal estimation, volume averages, and line averages.
 
 **Step 2 — Normal estimation by SVD.** For tensor-valued $\sigma$, the scalar
-proxy $\tfrac{1}{3}\operatorname{tr}\sigma$ is used for interface detection
+proxy $\tfrac{1}{3}\mathrm{tr}\sigma$ is used for interface detection
 (the tensor values are retained for the homogenization integrals), so
 detection responds to conductivity *magnitude*, not anisotropy *direction*.
 The normal is estimated geometrically — not from finite differences, which
