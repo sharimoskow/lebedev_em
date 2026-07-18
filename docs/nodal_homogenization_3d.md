@@ -72,7 +72,7 @@ exactly at every level set of $\hat{\boldsymbol{n}}\cdot\boldsymbol{x}$: the
 tangential electric field and the normal current density are both constant in
 the $\hat{\boldsymbol{n}}$ direction. This motivates the local solution space
 
-$$L(H) = \mathrm{span}\bigl\{1,\;\hat{\boldsymbol{m}}\cdot\boldsymbol{x},\;\hat{\boldsymbol{q}}\cdot\boldsymbol{x},\;\varphi_n(\boldsymbol{x})\bigr\},$$
+$$L(H) = \mathrm{span}\{1,\;\hat{\boldsymbol{m}}\cdot\boldsymbol{x},\;\hat{\boldsymbol{q}}\cdot\boldsymbol{x},\;\varphi_n(\boldsymbol{x})\},$$
 
 where
 
@@ -108,7 +108,7 @@ $$\frac{1}{\Delta x_k}\int_{x_k^-}^{x_k^+} \frac{\partial\varphi_n}{\partial x_k
 
 where
 
-$$d_k = \left\langle\sigma^{-1}\right\rangle_k := \frac{1}{\Delta x_k}\int_{x_k^-}^{x_k^+} \frac{dx_k}{\sigma(\hat{\boldsymbol{n}}\cdot\boldsymbol{x})}\Bigg|_{\text{other coords at node}} \tag{3}$$
+$$d_k = \left\langle\sigma^{-1}\right\rangle_k := \frac{1}{\Delta x_k}\int_{x_k^-}^{x_k^+} \frac{dx_k}{\sigma(\hat{\boldsymbol{n}}\cdot\boldsymbol{x})}|_{\text{other coords at node}} \tag{3}$$
 
 is the line average of $\sigma^{-1}$ along axis $\hat{\boldsymbol{e}}_k$
 **through the node**. This integral is taken at fixed coordinates
@@ -124,7 +124,7 @@ $$\widetilde{\nabla}\phi = a_1\,\hat{\boldsymbol{m}} + a_2\,\hat{\boldsymbol{q}}
 
 or in matrix form
 
-$$\widetilde{\nabla}\phi = \widetilde{L}\,\boldsymbol{a}, \qquad \widetilde{L} := \bigl[\hat{\boldsymbol{m}}\;\big|\;\hat{\boldsymbol{q}}\;\big|\;D\hat{\boldsymbol{n}}\bigr] \in \mathbb{R}^{3\times 3}.$$
+$$\widetilde{\nabla}\phi = \widetilde{L}\,\boldsymbol{a}, \qquad \widetilde{L} := [\hat{\boldsymbol{m}}\;|\;\hat{\boldsymbol{q}}\;|\;D\hat{\boldsymbol{n}}] \in \mathbb{R}^{3\times 3}.$$
 
 ## 4. Energy Matching Condition
 
@@ -136,15 +136,15 @@ $$|H|\;\widetilde{\nabla}\phi\cdot\Sigma_D\,\widetilde{\nabla}\psi = \int_H \nab
 **Right-hand side.** Using (2) and the orthonormality of
 $\{\hat{\boldsymbol{m}},\hat{\boldsymbol{q}},\hat{\boldsymbol{n}}\}$,
 
-$$\nabla\phi\cdot\sigma\nabla\psi = \sigma\bigl(a_1 b_1 + a_2 b_2\bigr) + \frac{a_3 b_3}{\sigma},$$
+$$\nabla\phi\cdot\sigma\nabla\psi = \sigma(a_1 b_1 + a_2 b_2) + \frac{a_3 b_3}{\sigma},$$
 
 so
 
-$$\int_H \nabla\phi\cdot\sigma\nabla\psi\;dV = |H|\bigl(\bar\sigma\,(a_1 b_1+a_2 b_2) + \langle\sigma^{-1}\rangle_{\mathrm{vol}}\, a_3 b_3\bigr) = |H|\;\boldsymbol{a}^\top G\,\boldsymbol{b},$$
+$$\int_H \nabla\phi\cdot\sigma\nabla\psi\;dV = |H|(\bar\sigma\,(a_1 b_1+a_2 b_2) + \langle\sigma^{-1}\rangle_{\mathrm{vol}}\, a_3 b_3) = |H|\;\boldsymbol{a}^\top G\,\boldsymbol{b},$$
 
 where
 
-$$G = \mathrm{diag}\bigl(\bar\sigma,\;\bar\sigma,\;\langle\sigma^{-1}\rangle_{\mathrm{vol}}\bigr), \tag{6}$$
+$$G = \mathrm{diag}(\bar\sigma,\;\bar\sigma,\;\langle\sigma^{-1}\rangle_{\mathrm{vol}}), \tag{6}$$
 
 with
 
@@ -168,7 +168,7 @@ $$|H|\;\widetilde{\nabla}\phi\cdot\Sigma_D\,\widetilde{\nabla}\psi = |H|\;\bolds
 gives $\widetilde{L}^\top\Sigma_D\,\widetilde{L} = G$, and solving for
 $\Sigma_D$:
 
-$$\boxed{\;\Sigma_D = \widetilde{L}^{-\top}\,G\,\widetilde{L}^{-1}, \qquad \widetilde{L} = [\hat{\boldsymbol{m}}\mid\hat{\boldsymbol{q}}\mid D\hat{\boldsymbol{n}}], \qquad G = \mathrm{diag}\bigl(\bar\sigma,\;\bar\sigma,\;\langle\sigma^{-1}\rangle_{\mathrm{vol}}\bigr).\;} \tag{7}$$
+$$\boxed{\;\Sigma_D = \widetilde{L}^{-\top}\,G\,\widetilde{L}^{-1}, \qquad \widetilde{L} = [\hat{\boldsymbol{m}}\mid\hat{\boldsymbol{q}}\mid D\hat{\boldsymbol{n}}], \qquad G = \mathrm{diag}(\bar\sigma,\;\bar\sigma,\;\langle\sigma^{-1}\rangle_{\mathrm{vol}}).\;} \tag{7}$$
 
 Here $\widetilde{L}^{-\top} := (\widetilde{L}^\top)^{-1} = (\widetilde{L}^{-1})^\top$.
 
@@ -289,7 +289,7 @@ $$E_n(t) = \frac{c_3 - \sigma_{mn}(t)\,c_1 - \sigma_{qn}(t)\,c_2}{\sigma_{nn}(t)
 
 The full gradient at level $t$ is therefore
 
-$$\nabla u\big|_{t} = c_1\,\hat{\boldsymbol{m}} + c_2\,\hat{\boldsymbol{q}} + E_n(t)\,\hat{\boldsymbol{n}}, \tag{A.5}$$
+$$\nabla u|_{t} = c_1\,\hat{\boldsymbol{m}} + c_2\,\hat{\boldsymbol{q}} + E_n(t)\,\hat{\boldsymbol{n}}, \tag{A.5}$$
 
 and the triple $(c_1,c_2,c_3)$ completely characterizes the local potential.
 
@@ -316,7 +316,7 @@ in (3): $D_1$ is the per-axis line average of $1/\sigma_{nn}$; $D_2$ and
 $D_3$ are the line averages of the ratios $\sigma_{mn}/\sigma_{nn}$ and
 $\sigma_{qn}/\sigma_{nn}$. Assembling all three Cartesian components:
 
-$$\widetilde{\nabla} u = \widetilde{L}\,\boldsymbol{c}, \qquad \widetilde{L} := \bigl[\,\hat{\boldsymbol{m}} - D_2\hat{\boldsymbol{n}} \;\big|\; \hat{\boldsymbol{q}} - D_3\hat{\boldsymbol{n}} \;\big|\; D_1\hat{\boldsymbol{n}}\,\bigr], \qquad \boldsymbol{c} = (c_1, c_2, c_3)^\top, \tag{A.11}$$
+$$\widetilde{\nabla} u = \widetilde{L}\,\boldsymbol{c}, \qquad \widetilde{L} := [\,\hat{\boldsymbol{m}} - D_2\hat{\boldsymbol{n}} \;|\; \hat{\boldsymbol{q}} - D_3\hat{\boldsymbol{n}} \;|\; D_1\hat{\boldsymbol{n}}\,], \qquad \boldsymbol{c} = (c_1, c_2, c_3)^\top, \tag{A.11}$$
 
 where $D_j\hat{\boldsymbol{n}}$ denotes the vector with $k$-th entry
 $[D_j]_{kk}\hat{n}_k$.
@@ -340,7 +340,7 @@ $\hat{\boldsymbol{n}}$ for every $t$. Substituting (A.4)–(A.5) into the
 pointwise energy density and using the symmetry of $\sigma(t)$, the
 normal–tangential cross-terms cancel and one obtains the clean factorization
 
-$$\nabla u\cdot\sigma(t)\nabla u = \boldsymbol{\xi}^\top\bigl(\hat{\boldsymbol{m}}\;\hat{\boldsymbol{q}}\bigr)^\top S(t)\bigl(\hat{\boldsymbol{m}}\;\hat{\boldsymbol{q}}\bigr)\boldsymbol{\xi} + \frac{c_3^2}{\sigma_{nn}(t)}, \qquad \boldsymbol{\xi} = (c_1,c_2)^\top. \tag{A.13}$$
+$$\nabla u\cdot\sigma(t)\nabla u = \boldsymbol{\xi}^\top(\hat{\boldsymbol{m}}\;\hat{\boldsymbol{q}})^\top S(t)(\hat{\boldsymbol{m}}\;\hat{\boldsymbol{q}})\boldsymbol{\xi} + \frac{c_3^2}{\sigma_{nn}(t)}, \qquad \boldsymbol{\xi} = (c_1,c_2)^\top. \tag{A.13}$$
 
 The tangential and normal contributions are **decoupled** pointwise.
 Integrating over $H$:
@@ -413,8 +413,8 @@ $\Sigma_D = \widetilde{L}^{-\top}\,G\,\widetilde{L}^{-1}$ with:
 | $D$ | $\mathrm{diag}(d_1,d_2,d_3)$, $\;d_k = \frac{1}{\Delta x_k}\int_{x_k^-}^{x_k^+} \frac{dx_k}{\sigma(\hat{\boldsymbol{n}}\cdot\boldsymbol{x})}$ | per-axis line avg of $\sigma^{-1}$ |
 | $\widetilde{L}$ | $[\hat{\boldsymbol{m}}\mid\hat{\boldsymbol{q}}\mid D\hat{\boldsymbol{n}}]$, with $\hat{\boldsymbol{m}},\hat{\boldsymbol{q}}\perp\hat{\boldsymbol{n}}$ orthonormal | discrete-gradient map |
 | $G$ | $\mathrm{diag}(\bar\sigma,\bar\sigma,\langle\sigma^{-1}\rangle_{\mathrm{vol}})$ | energy matrix |
-| $\bar\sigma$ | $\frac{1}{\|H\|}\int_H \sigma\,dV$ | volume avg of $\sigma$ |
-| $\langle\sigma^{-1}\rangle_{\mathrm{vol}}$ | $\frac{1}{\|H\|}\int_H \sigma^{-1}\,dV$ | volume avg of $\sigma^{-1}$ |
+| $\bar\sigma$ | $\frac{1}{\lvert H\rvert}\int_H \sigma\,dV$ | volume avg of $\sigma$ |
+| $\langle\sigma^{-1}\rangle_{\mathrm{vol}}$ | $\frac{1}{\lvert H\rvert}\int_H \sigma^{-1}\,dV$ | volume avg of $\sigma^{-1}$ |
 
 All quantities are well-defined for any measurable profile
 $\sigma = \sigma(\hat{\boldsymbol{n}}\cdot\boldsymbol{x})$, with any number
