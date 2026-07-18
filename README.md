@@ -18,6 +18,14 @@ scenarios with dipping beds, and EM-based fracture/crack imaging — where crack
 appear as sharp conductivity contrasts at arbitrary orientations, precisely the
 case handled by the oblique-interface nodal homogenization.
 
+**Research context.** This code is developed for academic research purposes in
+the Department of Mathematics at Drexel University. The project supports our
+proposal to the U.S. Department of Energy's **Genesis** program on the modeling
+of fractures — thin, high-contrast conductivity structures at arbitrary
+orientations, the regime addressed by the nodal homogenization and validated in
+the thin-layer benchmark — as well as related proposals, including to the Air
+Force Office of Scientific Research (**AFOSR**) on subsurface imaging.
+
 ---
 
 ## Features
