@@ -4,6 +4,10 @@ import numpy as np
 import scipy.sparse.linalg as spla
 import warnings; warnings.filterwarnings('ignore')
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src'))
+import os as _os
+OUT_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'out')
+_os.makedirs(OUT_DIR, exist_ok=True)
+
 from lebedev_em.grid import (symmetric_optimal_grid, hybrid_axial_grid,
                              C000, C101, C110, C011)
 from lebedev_em.media import from_geometry_func, from_sigma_func, MU0, EPS0
@@ -45,7 +49,7 @@ if sys.argv[2]=='extract':
     x0,y0=float(grid.x[grid.Mx//2]),float(grid.y[grid.My//2])
     paper={-2.17:0.80,-1.93:0.95,-1.68:1.17,-1.43:1.47,-1.17:1.92,-0.95:2.63,
            -0.77:3.52,-0.66:4.25,-0.57:5.10,-0.47:6.42,-0.38:8.42,-0.30:11.15,-0.25:13.40}
-    Bc={c:np.load(f'/home/claude/fig9t_{variant}_{c}.npz')['B'] for c in CLUSTERS}
+    Bc={c:np.load(OUT_DIR + f'/fig9t_{variant}_{c}.npz')['B'] for c in CLUSTERS}
     print(f"[{variant}]  z    FD ImBz(nT)  paper  paper/FD")
     rats=[]
     for zz,p in paper.items():
@@ -70,5 +74,5 @@ else:
         d_inv=np.where(np.abs(d)>1e-30,1.0/d,1.0)
         M=spla.LinearOperator(A_bc.shape,matvec=lambda x:d_inv*x,dtype=complex)
         E,info=spla.lgmres(A_bc,b_bc,M=M,rtol=1e-8,atol=0,maxiter=400,inner_m=30,outer_k=10)
-        np.savez(f'/home/claude/fig9t_{variant}_{c}.npz',B=compute_B_from_E(grid,E,OMEGA))
+        np.savez(OUT_DIR + f'/fig9t_{variant}_{c}.npz',B=compute_B_from_E(grid,E,OMEGA))
         print(f'{variant} cluster {c} info={info} t={time.time()-t0:.0f}s',flush=True)

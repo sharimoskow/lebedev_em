@@ -1,5 +1,20 @@
 """
-plot_ddh03_fig7.py — Reproduce DDH03 Figure 7 (self-consistency convergence test).
+plot_ddh03_fig7.py — DDH03 Figure 7 model: SELF-CONSISTENCY convergence test only.
+
+STATUS NOTE (July 2026): this script demonstrates k-convergence of the optimal
+grids (its original purpose) but is NOT a like-for-like reproduction of the
+paper's method, and its absolute amplitudes should not be compared against the
+published Fig. 7 curves. It uses a single-cluster source, a global BC
+assignment with nearest-node extraction, a coarse transverse grid
+(H_MIN = 0.5 m, so the R = 0.1 m borehole is under-resolved — and since all k
+share H_MIN, the k-convergence test cannot detect the resulting bias), and
+pointwise media with no sub-cell homogenization. For the complete DDH03
+methodology (eq.-7 four-cluster sources, per-cluster mixed BCs,
+interpolate-then-average, h_min = 0.05 m, nodal homogenization), see
+fig7_full_ddh03.py. Even with the full method, the published Fig. 7 amplitudes
+are not yet matched (flat factors ~1.8 in Bxx, ~2.7 in Bxz, localized to the
+invasion-zone treatment by the variant scan in fig7_variants.py); the
+absolutely calibrated benchmark against published curves is fig9_check.py.
 
 Geometry (Figure 6 of DDH03):
   - Borehole   : σ = 0.05 S/m, R = 0.1 m

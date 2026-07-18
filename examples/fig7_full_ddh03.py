@@ -14,6 +14,10 @@ import numpy as np
 import scipy.sparse.linalg as spla
 import warnings; warnings.filterwarnings('ignore')
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src'))
+import os as _os
+OUT_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'out')
+_os.makedirs(OUT_DIR, exist_ok=True)
+
 
 from lebedev_em.grid import (symmetric_optimal_grid, hybrid_axial_grid,
                              C000, C101, C110, C011)
@@ -32,7 +36,7 @@ D_PLANE = N_HAT[2]*(-0.5)
 SIGMA_ANISO = SIGMA_T*np.eye(3) + (SIGMA_N-SIGMA_T)*np.outer(N_HAT, N_HAT)
 H_MIN = 0.05; K_VAL = 6; GAMMA = 1/2**0.5
 CLUSTERS = [C000, C101, C110, C011]
-OUT = '/home/claude/fig7_full_B_{c}.npz'
+OUT = OUT_DIR + '/fig7_full_B_{c}.npz'
 
 def sigma_func(X, Y, Z):
     X=np.asarray(X,dtype=float); Y=np.asarray(Y,dtype=float); Z=np.asarray(Z,dtype=float)
@@ -70,7 +74,7 @@ if sys.argv[1] == 'extract':
     z_bx, Bxx = lebedev_B_on_z_axis(grid, Bc, comp=0)
     z_bz, Bxz = lebedev_B_on_z_axis(grid, Bc, comp=2)
     z_bx=np.asarray(z_bx); Bxx=np.asarray(Bxx); Bxz=np.asarray(Bxz)
-    np.savez('/home/claude/fig7_full_ddh03_k6.npz', z=z_bx, Bxx=Bxx, Bxz=Bxz)
+    np.savez(OUT_DIR + '/fig7_full_ddh03_k6.npz', z=z_bx, Bxx=Bxx, Bxz=Bxz)
     paper_xx = {-1.663:3.11,-1.541:3.66,-1.051:7.17,-0.929:8.46,-0.806:10.11,
                 -0.684:12.21,-0.561:14.84,-0.194:32.47,-0.071:60.82}
     paper_xz = {-1.663:3.89,-1.541:4.20,-1.051:5.43,-0.929:5.67,-0.806:5.80,

@@ -18,6 +18,10 @@ import numpy as np
 import scipy.sparse.linalg as spla
 import warnings; warnings.filterwarnings('ignore')
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src'))
+import os as _os
+OUT_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'out')
+_os.makedirs(OUT_DIR, exist_ok=True)
+
 
 from lebedev_em.grid import (symmetric_optimal_grid, hybrid_axial_grid,
                              C000, C101, C110, C011)
@@ -76,10 +80,10 @@ if sys.argv[1] == 'extract':
              'layer':   {-2.17:0.80,-1.93:0.95,-1.68:1.17,-1.43:1.47,-1.17:1.92,-0.95:2.63,
                          -0.77:3.52,-0.66:4.25,-0.57:5.10,-0.47:6.42,-0.38:8.42,-0.30:11.15,-0.25:13.40}}
     for tag in ('nolayer','layer'):
-        Bc = {c: np.load(f'/home/claude/fig9_B_{tag}_{c}.npz')['B'] for c in CLUSTERS}
+        Bc = {c: np.load(OUT_DIR + f'/fig9_B_{tag}_{c}.npz')['B'] for c in CLUSTERS}
         z_ax, Bz = lebedev_B_on_z_axis(grid, Bc, comp=2)
         z_ax=np.asarray(z_ax); Bz=np.asarray(Bz)
-        np.savez(f'/home/claude/fig9_{tag}_result.npz', z=z_ax, Bz=Bz)
+        np.savez(OUT_DIR + f'/fig9_{tag}_result.npz', z=z_ax, Bz=Bz)
         print(f"\n[{tag}]   z     FD ImBz(nT)   paper   paper/FD")
         for zz, p in paper[tag].items():
             i = int(np.argmin(np.abs(z_ax - zz)))
@@ -101,5 +105,5 @@ else:
         E, info = spla.lgmres(A_bc, b_bc, M=M, rtol=1e-8, atol=0,
                               maxiter=400, inner_m=30, outer_k=10)
         B = compute_B_from_E(grid, E, OMEGA)
-        np.savez(f'/home/claude/fig9_B_{tag}_{c}.npz', B=B)
+        np.savez(OUT_DIR + f'/fig9_B_{tag}_{c}.npz', B=B)
         print(f'{tag} cluster {c} info={info} t={time.time()-t0:.0f}s', flush=True)

@@ -80,10 +80,49 @@ z_ax, Bxx = extract_axis_response(grid, result, comp='xx')
 
 ---
 
-## DDH03 benchmark example
+## Benchmarks
 
-The `examples/` directory reproduces the DDH03 benchmark from the paper: a
-deviated borehole with bore (r < 0.1 m, σ = 0.05 S/m), invasion zone
+Two benchmarks are validated in absolute units (unit dipole moment, SI, no
+fitted constants):
+
+- **Two half-spaces (exact analytic reference).** VED over a 10× conductivity
+  contrast, checked against the exact Sommerfeld-integral solution: ~1% RMS
+  in the conductive half-space; the four-cluster Lebedev average reduces the
+  single-cluster error five-fold.
+
+  ```bash
+  python examples/benchmark_two_layer.py
+  ```
+
+- **Thin dipping anisotropic layer (DDH03 Fig. 9 configuration).** Resistive
+  borehole crossing a 0.25 m-thick 75° dipping layer with σ_N = σ_T/200 at
+  52.65 kHz, solved with the complete DDH03 methodology (eq.-7 four-cluster
+  sources, per-cluster mixed BCs, interpolate-then-average, h_min = 0.05 m,
+  sequential nodal homogenization). Matches the published curves at the
+  few-percent level. Note: at this resolution the *nodal* averaging is
+  essential — standard arithmetic/harmonic averaging captures only a small
+  fraction of the thin layer's effect (see `examples/fig9_tests.py`).
+
+  ```bash
+  # four cluster solves, then comparison table vs the published values:
+  python examples/fig9_check.py nolayer 0 1 2 3
+  python examples/fig9_check.py layer   0 1 2 3
+  python examples/fig9_check.py extract
+  ```
+
+**Work in progress:** the DDH03 Figs. 6–7 deviated-borehole model
+(borehole + invasion + 60° dipping anisotropic half-space). The full-method
+runner is `examples/fig7_full_ddh03.py`; it reproduces the published curve
+*shapes* precisely but not yet the amplitudes (flat offsets ×1.8 in B_xx and
+×2.7 in B_xz, localized to the invasion-zone treatment by
+`examples/fig7_variants.py`). `examples/plot_ddh03_fig7.py` is a
+k-self-consistency test only — see its docstring before comparing its output
+to the paper.
+
+## DDH03 model example (media-building strategies)
+
+The `examples/` directory also exercises the DDH03 deviated-borehole model
+with different media builders: bore (r < 0.1 m, σ = 0.05 S/m), invasion zone
 (0.1 < r < 0.6 m, σ = 0.10 S/m), and a dipping anisotropic formation
 (60° dip; σ_T = 0.10 S/m, σ_N = 0.01 S/m below dip; σ = 0.50 S/m above dip).
 

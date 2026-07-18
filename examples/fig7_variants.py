@@ -4,6 +4,10 @@ import numpy as np
 import scipy.sparse.linalg as spla
 import warnings; warnings.filterwarnings('ignore')
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src'))
+import os as _os
+OUT_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'out')
+_os.makedirs(OUT_DIR, exist_ok=True)
+
 from lebedev_em.grid import (symmetric_optimal_grid, hybrid_axial_grid,
                              C000, C101, C110, C011)
 from lebedev_em.media import from_geometry_func, MU0, EPS0
@@ -46,11 +50,11 @@ variant = sys.argv[1]
 if sys.argv[2] == 'extract':
     z_fd = hybrid_axial_grid(-3.5,2.5,96,8,GAMMA)
     grid = symmetric_optimal_grid(H_MIN,300.,z_fd,GAMMA,k=K_VAL)
-    Bc={c:np.load(f'/home/claude/fig7v_{variant}_{c}.npz')['B'] for c in CLUSTERS}
+    Bc={c:np.load(OUT_DIR + f'/fig7v_{variant}_{c}.npz')['B'] for c in CLUSTERS}
     z_bx,Bxx=lebedev_B_on_z_axis(grid,Bc,comp=0)
     z_bz,Bxz=lebedev_B_on_z_axis(grid,Bc,comp=2)
     z_bx=np.asarray(z_bx);Bxx=np.asarray(Bxx);Bxz=np.asarray(Bxz)
-    np.savez(f'/home/claude/fig7v_{variant}_result.npz',z=z_bx,Bxx=Bxx,Bxz=Bxz)
+    np.savez(OUT_DIR + f'/fig7v_{variant}_result.npz',z=z_bx,Bxx=Bxx,Bxz=Bxz)
     paper_xx={-1.663:3.11,-1.541:3.66,-1.051:7.17,-0.929:8.46,-0.806:10.11,-0.684:12.21,-0.561:14.84,-0.194:32.47,-0.071:60.82}
     paper_xz={-1.663:3.89,-1.541:4.20,-1.051:5.43,-0.929:5.67,-0.806:5.80,-0.684:5.97,-0.561:5.83,-0.439:5.58,-0.316:5.31,-0.194:4.70,-0.071:4.07}
     print(f"[{variant}]  z    ImBxx  paper ratio |  ImBxz  paper ratio")
@@ -78,5 +82,5 @@ else:
         M=spla.LinearOperator(A_bc.shape,matvec=lambda x:d_inv*x,dtype=complex)
         E,info=spla.lgmres(A_bc,b_bc,M=M,rtol=1e-8,atol=0,maxiter=400,inner_m=30,outer_k=10)
         B=compute_B_from_E(grid,E,OMEGA)
-        np.savez(f'/home/claude/fig7v_{variant}_{c}.npz',B=B)
+        np.savez(OUT_DIR + f'/fig7v_{variant}_{c}.npz',B=B)
         print(f'{variant} cluster {c} info={info} t={time.time()-t0:.0f}s',flush=True)
