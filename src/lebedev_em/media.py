@@ -2521,22 +2521,10 @@ def from_sigma_func(
 
             if method == "backus":
                 # Correct ANISOTROPIC laminate (DDH03 eq. 9), averaged over the
-                # width-h Voronoi reaction cell — the σ̇E mass-term control
-                # volume — NOT the 2h centered-difference stencil box used for
-                # the (gradient-based) nodal line averages.
-                xv_lo = 0.5 * (float(x_fd[max(i - 1, 0)]) + x_node)
-                xv_hi = 0.5 * (x_node + float(x_fd[min(i + 1, len(x_fd) - 1)]))
-                yv_lo = 0.5 * (float(y_fd[max(j - 1, 0)]) + y_node)
-                yv_hi = 0.5 * (y_node + float(y_fd[min(j + 1, len(y_fd) - 1)]))
-                zv_lo = 0.5 * (float(z_fd[max(k - 1, 0)]) + z_node)
-                zv_hi = 0.5 * (z_node + float(z_fd[min(k + 1, len(z_fd) - 1)]))
-                _mx = (x_svd >= xv_lo - 1e-12) & (x_svd <= xv_hi + 1e-12)
-                _my = (y_svd >= yv_lo - 1e-12) & (y_svd <= yv_hi + 1e-12)
-                _mz = (z_svd >= zv_lo - 1e-12) & (z_svd <= zv_hi + 1e-12)
-                _voro = _mx[:, None, None] & _my[None, :, None] & _mz[None, None, :]
-                if not _voro.any():
-                    _voro = np.ones(block_svd.shape, dtype=bool)
-
+                # SAME node-centred dual cell [x_{i-1}, x_{i+1}] that DDH03 /
+                # Moskow et al. (1999) use for the homogenization (and that the
+                # nodal path uses) — i.e. the full sampled block, not a
+                # sub-cell.
                 if _func_is_tensor and _block_tensor_svd is not None:
                     _sig_mid = 0.5 * (block_svd.max() + block_svd.min())
                     _binary = block_svd >= _sig_mid
@@ -2544,16 +2532,13 @@ def from_sigma_func(
                     if _mask1.any() and _mask2.any():
                         _s1 = np.mean(_block_tensor_svd[_mask1], axis=0)
                         _s2 = np.mean(_block_tensor_svd[_mask2], axis=0)
-                        _fv = float((_mask1 & _voro).sum()) / float(_voro.sum())
+                        _fv = float(_mask1.mean())
                         t = _anisotropic_backus_tensor_3d(_s1, _s2, _fv, n_hat)
                     else:
                         _set_diagonal(seq, s_xx, s_yy, s_zz)
                         continue
                 else:
-                    _bc_v = _block_c[_voro]
-                    _sa_v = complex(np.mean(_bc_v))
-                    _iv_v = complex(np.mean(1.0 / _bc_v))
-                    t = _standard_backus_tensor_3d(_sa_v, _iv_v, n_hat)
+                    t = _standard_backus_tensor_3d(sigma_arith, inv_sigma_vol, n_hat)
             else:   # "nodal"
                 if _func_is_tensor and _block_tensor_svd is not None:
                     # ── Tensor-valued callable ────────────────────────────────
@@ -2957,8 +2942,9 @@ def from_geometry_func(
     ``method`` selects the effective-medium formula for straddling cells:
     ``"nodal"`` (default) the Moskow energy-matched tensor; ``"backus"`` the
     correct anisotropic laminate (DDH03 eq. 9) with volume fractions taken over
-    the width-h Voronoi reaction cell — used for single-interface cells, with
-    multi-interface cells falling back to the sequential nodal path;
+    the node-centred dual cell [x_{i-1}, x_{i+1}] (the same cell DDH03 / Moskow
+    homogenize over) — used for single-interface and parallel-slab cells, with
+    genuinely multi-interface cells falling back to the sequential nodal path;
     ``"pointwise"`` no averaging (each node keeps its material tensor).
 
     This is the "perfect geometry" companion to :func:`from_sigma_func`.
@@ -3189,10 +3175,9 @@ def from_geometry_func(
         if method == "pointwise":
             continue  # keep the pointwise material tensor already stored
 
-        # ── Backus: correct anisotropic laminate over the Voronoi reaction cell ─
-        # Single-interface cells use the analytic normal directly; multi-
-        # interface cells fall through to the sequential nodal path below.
-        # Backus (eq. 9) applies to a two-material laminate: a single interface,
+        # ── Backus (eq. 9) over the node-centred dual cell [x_{i-1}, x_{i+1}] ──
+        # (the same averaging cell DDH03 / Moskow et al. use, and the nodal path
+        # uses).  Backus applies to a two-material laminate: a single interface,
         # OR several MUTUALLY PARALLEL interfaces (a thin slab of one material
         # between two parallel faces — still a two-material cell).  Genuinely
         # distinct (non-parallel) interfaces fall through to the nodal path.
@@ -3205,26 +3190,13 @@ def from_geometry_func(
             _binary = block_svd >= _sig_mid
             _m1, _m2 = ~_binary, _binary          # region 1 = lower σ
             if _m1.any() and _m2.any():
-                # Volume fraction over the width-h Voronoi (reaction) cell.
-                xv_lo = 0.5 * (float(x_fd[max(i - 1, 0)]) + x_node)
-                xv_hi = 0.5 * (x_node + float(x_fd[min(i + 1, len(x_fd) - 1)]))
-                yv_lo = 0.5 * (float(y_fd[max(j - 1, 0)]) + y_node)
-                yv_hi = 0.5 * (y_node + float(y_fd[min(j + 1, len(y_fd) - 1)]))
-                zv_lo = 0.5 * (float(z_fd[max(k - 1, 0)]) + z_node)
-                zv_hi = 0.5 * (z_node + float(z_fd[min(k + 1, len(z_fd) - 1)]))
-                _bx = (x_svd >= xv_lo - 1e-12) & (x_svd <= xv_hi + 1e-12)
-                _by = (y_svd >= yv_lo - 1e-12) & (y_svd <= yv_hi + 1e-12)
-                _bz = (z_svd >= zv_lo - 1e-12) & (z_svd <= zv_hi + 1e-12)
-                _voro = _bx[:, None, None] & _by[None, :, None] & _bz[None, None, :]
-                if not _voro.any():
-                    _voro = np.ones(block_svd.shape, dtype=bool)
                 if _func_is_tensor and _block_tensor is not None:
                     _s1 = np.mean(_block_tensor[_m1], axis=0)
                     _s2 = np.mean(_block_tensor[_m2], axis=0)
                 else:
                     _s1 = complex(np.mean(_block_c[_m1]))
                     _s2 = complex(np.mean(_block_c[_m2]))
-                _fv = float((_m1 & _voro).sum()) / float(_voro.sum())
+                _fv = float(_m1.mean())    # volume fraction over the dual cell
                 t_b = _anisotropic_backus_tensor_3d(_s1, _s2, _fv, _n_b)
                 if np.all(np.isfinite(t_b)):
                     tb_diag = np.array([t_b[0, 0], t_b[1, 1], t_b[2, 2]])
@@ -3309,11 +3281,11 @@ def from_geometry_exact(
     homogenised (recursively) first, and the two sides are combined **last**
     across the innermost normal — the notes' "outer materials first" order.
 
-    ``method``: ``"pointwise"`` (node material), ``"backus"`` (eq. 9 laminate,
-    over the width-h Voronoi reaction cell — bound-preserving at every step, so
-    the effective tensor can never leave the constituent eigenvalue range), or
-    ``"nodal"`` (currently delegates to :func:`from_geometry_func`; the
-    reaction-cell nodal reformulation is in progress).
+    ``method``: ``"pointwise"`` (node material), ``"backus"`` (eq. 9 laminate
+    over the node-centred dual cell [x_{i-1}, x_{i+1}], as in DDH03 / Moskow —
+    bound-preserving at every step, so the effective tensor can never leave the
+    constituent eigenvalue range), or ``"nodal"`` (currently delegates to
+    :func:`from_geometry_func`).
 
     Parameters
     ----------
@@ -3379,10 +3351,11 @@ def from_geometry_exact(
             sigma_R[seq] = _mat_at(xn, yn, zn)
             continue
 
-        # width-h Voronoi reaction cell
-        xlo, xhi = 0.5 * (bmin[0] + xn), 0.5 * (xn + bmax[0])
-        ylo, yhi = 0.5 * (bmin[1] + yn), 0.5 * (yn + bmax[1])
-        zlo, zhi = 0.5 * (bmin[2] + zn), 0.5 * (zn + bmax[2])
+        # node-centred dual cell [x_{i-1}, x_{i+1}] — the same averaging cell
+        # DDH03 / Moskow et al. (1999) homogenize over (and the nodal path uses).
+        xlo, xhi = bmin[0], bmax[0]
+        ylo, yhi = bmin[1], bmax[1]
+        zlo, zhi = bmin[2], bmax[2]
         nx = max(3, int(np.ceil((xhi - xlo) / h_svd)) + 1)
         ny = max(3, int(np.ceil((yhi - ylo) / h_svd)) + 1)
         nz = max(3, int(np.ceil((zhi - zlo) / h_svd)) + 1)
