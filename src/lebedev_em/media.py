@@ -3257,6 +3257,142 @@ def from_geometry_func(
     return EMMedia(grid, sigma_R_out, mu_P, eps_R)
 
 
+def _interval_measure(intervals) -> float:
+    """Total length of a set of (possibly overlapping) 1-D intervals."""
+    ivs = sorted((a, b) for a, b in intervals if b > a)
+    if not ivs:
+        return 0.0
+    tot = 0.0
+    ca, cb = ivs[0]
+    for a, b in ivs[1:]:
+        if a > cb:
+            tot += cb - ca; ca, cb = a, b
+        else:
+            cb = max(cb, b)
+    tot += cb - ca
+    return tot
+
+
+def _intersect_intervals(A, B):
+    """Intersection of two interval lists."""
+    out = []
+    for a1, b1 in A:
+        for a2, b2 in B:
+            lo, hi = max(a1, a2), min(b1, b2)
+            if hi > lo:
+                out.append((lo, hi))
+    return out
+
+
+def _y_measure_at_x(x, y0, y1, cyls):
+    """Length of the y-segment at fixed x allowed by the cylinder constraints
+    (each ``(radius, is_inside)``; cylinders are axis-aligned along z)."""
+    BIG = 1e12
+    S = [(y0, y1)]
+    for R, is_in in cyls:
+        d2 = R * R - x * x
+        s = d2 ** 0.5 if d2 > 0 else 0.0
+        cons = [(-s, s)] if is_in else [(-BIG, -s), (s, BIG)]
+        S = _intersect_intervals(S, cons)
+        if not S:
+            break
+    return _interval_measure(S)
+
+
+def _z_measure_at_x(x, z0, z1, planes):
+    """Length of the z-segment at fixed x allowed by the planar constraints
+    (each ``(n_hat, d, is_inside)`` with n_y == 0; is_inside means n̂·x < d)."""
+    BIG = 1e12
+    S = [(z0, z1)]
+    for n, d, is_in in planes:
+        nx, nz = float(n[0]), float(n[2])
+        if abs(nz) < 1e-14:                       # constraint purely on x
+            below = (nx * x < d)
+            if (below if is_in else not below) is False:
+                return 0.0
+            continue
+        c = (d - nx * x) / nz
+        if is_in:
+            cons = [(-BIG, c)] if nz > 0 else [(c, BIG)]
+        else:
+            cons = [(c, BIG)] if nz > 0 else [(-BIG, c)]
+        S = _intersect_intervals(S, cons)
+        if not S:
+            break
+    return _interval_measure(S)
+
+
+def _region_volume(bmin, bmax, constraints):
+    """
+    Exact volume of the dual-cell box ∩ (all constraints), where each
+    constraint is ``(boundary, is_inside)``.  Cylinders (axis-aligned along z)
+    constrain (x, y); planes with n_y = 0 constrain (x, z).  The two are
+    coupled only through x, so the volume is the 1-D integral
+
+        ∫ L_y(x) · L_z(x) dx
+
+    with L_y, L_z the exact segment lengths at fixed x.  The integrand is
+    smooth between the breakpoints (±R and the plane/box crossings), so a
+    Gauss–Legendre rule on each sub-interval is exact to machine precision.
+    Returns ``None`` if a constraint type is unsupported (e.g. a tilted plane
+    with n_y ≠ 0), signalling the caller to fall back.
+    """
+    from .geometry import PlanarBoundary, CylindricalBoundary
+    from numpy.polynomial.legendre import leggauss
+
+    x0, x1 = float(bmin[0]), float(bmax[0])
+    y0, y1 = float(bmin[1]), float(bmax[1])
+    z0, z1 = float(bmin[2]), float(bmax[2])
+    cyls, planes = [], []
+    for b, is_in in constraints:
+        if isinstance(b, CylindricalBoundary):
+            cyls.append((b.radius, is_in))
+        elif isinstance(b, PlanarBoundary):
+            if abs(float(b.n_hat[1])) > 1e-9:
+                return None                       # tilted-in-y plane: unsupported
+            planes.append((b.n_hat, b.d, is_in))
+        else:
+            return None                           # unsupported boundary type
+
+    bps = {x0, x1}
+    for R, _ in cyls:
+        for xb in (-R, R):
+            if x0 < xb < x1:
+                bps.add(xb)
+    for n, d, _ in planes:
+        if abs(float(n[0])) > 1e-14 and abs(float(n[2])) > 1e-14:
+            for zz in (z0, z1):
+                xb = (d - float(n[2]) * zz) / float(n[0])
+                if x0 < xb < x1:
+                    bps.add(xb)
+    bps = sorted(bps)
+
+    # With no cylinder the integrand L_y·L_z is piecewise-linear in x, so plain
+    # Gauss on each [breakpoint] panel is exact.  A cylinder adds a √(R²−x²)
+    # term with an endpoint (x=±R) singularity, so there we subdivide each panel
+    # with Chebyshev-clustered sub-panels (dense at both ends) for fast
+    # convergence.  Cylinder cells are few, so this cost is localised.
+    have_cyl = len(cyls) > 0
+    gx, gw = leggauss(12 if have_cyl else 24)
+    total = 0.0
+    for xa, xb in zip(bps[:-1], bps[1:]):
+        if have_cyl:
+            th = np.linspace(0.0, np.pi, 25)          # 24 Chebyshev sub-panels
+            sub = 0.5 * (xa + xb) - 0.5 * (xb - xa) * np.cos(th)
+        else:
+            sub = (xa, xb)
+        for pa, pb in zip(sub[:-1], sub[1:]):
+            mid, half = 0.5 * (pa + pb), 0.5 * (pb - pa)
+            for xg, wg in zip(gx, gw):
+                x = mid + half * xg
+                ly = _y_measure_at_x(x, y0, y1, cyls)
+                if ly == 0.0:
+                    continue
+                lz = _z_measure_at_x(x, z0, z1, planes)
+                total += half * wg * ly * lz
+    return total
+
+
 def from_geometry_exact(
     grid: "LebedevGrid3D",
     sigma_func,
@@ -3319,9 +3455,17 @@ def from_geometry_exact(
 
     sigma_R = np.zeros((N_R, 3, 3), dtype=complex)
 
-    def _recurse(sig, px, py, pz, ids, boundaries, node):
+    def _recurse(sig, px, py, pz, ids, boundaries, node, bmin, bmax, cons):
         """Effective (Backus) tensor of the sub-voxels *ids*, laminating
-        across *boundaries* (innermost first) with bound-preserving eq. (9)."""
+        across *boundaries* (innermost first) with bound-preserving eq. (9).
+
+        The sub-voxel grid is used ONLY to identify the exact material tensor
+        of each region (an exact point evaluation) and to detect which side of
+        a boundary a region occupies.  The laminate volume fraction is computed
+        ANALYTICALLY from the geometry (``_region_volume``) — no voxel-count
+        estimate — so the result carries no sampling error on the exact path.
+        *cons* accumulates the (boundary, is_inside) constraints of outer
+        splits that define the current region."""
         s0 = sig[ids[0]]
         if np.abs(sig[ids] - s0).max() < 1e-12:
             return s0                                  # uniform region
@@ -3331,10 +3475,18 @@ def from_geometry_exact(
         outside = b0.side(px[ids], py[ids], pz[ids])   # True = outer side
         inside = ~outside
         if inside.all() or outside.all():
-            return _recurse(sig, px, py, pz, ids, boundaries[1:], node)
-        Sin = _recurse(sig, px, py, pz, ids[inside], boundaries[1:], node)
-        Sout = _recurse(sig, px, py, pz, ids[outside], boundaries[1:], node)
-        f_in = float(inside.mean())
+            return _recurse(sig, px, py, pz, ids, boundaries[1:], node,
+                            bmin, bmax, cons)
+        Sin = _recurse(sig, px, py, pz, ids[inside], boundaries[1:], node,
+                       bmin, bmax, cons + [(b0, True)])
+        Sout = _recurse(sig, px, py, pz, ids[outside], boundaries[1:], node,
+                        bmin, bmax, cons + [(b0, False)])
+        v_cur = _region_volume(bmin, bmax, cons)
+        v_in = _region_volume(bmin, bmax, cons + [(b0, True)])
+        if v_cur is None or v_in is None or v_cur <= 0.0:
+            f_in = float(inside.mean())                # fallback: unsupported geometry
+        else:
+            f_in = float(np.clip(v_in / v_cur, 0.0, 1.0))
         return _anisotropic_backus_tensor_3d(Sin, Sout, f_in, b0.normal_at(node))
 
     for seq, (i, j, k) in enumerate(grid.R_nodes):
@@ -3372,7 +3524,8 @@ def from_geometry_exact(
             sig = (raw.reshape(-1)[:, None, None] * np.eye(3, dtype=complex)[None])
         px, py, pz = Xg.ravel(), Yg.ravel(), Zg.ravel()
         ids = np.arange(px.size)
-        t = _recurse(sig, px, py, pz, ids, list(straddled), node)
+        t = _recurse(sig, px, py, pz, ids, list(straddled), node,
+                     bmin, bmax, [])
 
         td = np.array([t[0, 0], t[1, 1], t[2, 2]])
         if abs(td - td.mean()).sum() + np.linalg.norm(t - np.diag(td)) < iso_tol * abs(td.mean()) + 1e-300:

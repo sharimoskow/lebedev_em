@@ -51,3 +51,19 @@ def test_pointwise_returns_node_material():
                             np.array([[[grid.z[k]]]])),complex).reshape(3,3)
         if np.abs(S[seq]-exact).max()>1e-9: bad+=1
     assert bad==0
+
+
+def test_region_volume_is_exact():
+    """Analytic dual-cell volumes must match closed forms, not sampled counts."""
+    import numpy as np
+    from lebedev_em.media import _region_volume
+    from lebedev_em.geometry import PlanarBoundary, CylindricalBoundary
+    bmin = np.array([-1., -1, -1]); bmax = np.array([1., 1, 1])
+    # plane through origin -> exactly half the box
+    P = PlanarBoundary([0, 0, 1], 0.0)
+    assert abs(_region_volume(bmin, bmax, [(P, True)]) - 4.0) < 1e-9
+    # cylinder R=0.5 -> pi*R^2 * height
+    C = CylindricalBoundary(0.5)
+    assert abs(_region_volume(bmin, bmax, [(C, True)]) - np.pi * 0.25 * 2) < 1e-6
+    # unsupported (n_y != 0 plane) -> None (caller falls back)
+    assert _region_volume(bmin, bmax, [(PlanarBoundary([0, 1, 0], 0.0), True)]) is None
