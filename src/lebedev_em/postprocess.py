@@ -618,8 +618,15 @@ def extract_B_on_axis_multicl(
     axis: str = "z",
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    Extract one component of **B** along the specified axis using the proper
-    Lebedev multi-cluster average.
+    Extract one component of **B** along the specified axis using the
+    Lebedev multi-cluster average of a SINGLE B vector.
+
+    Note: because this function interpolates all four cluster sub-grids of
+    one shared B vector, it is safe for anisotropic media PROVIDED the B
+    vector comes from a coupled solve with all-cluster sources
+    (``solve_coupled`` / summed multicluster RHS).  Do not feed it a
+    single-cluster-source solution in anisotropic media — see the warning
+    on ``lebedev_B_on_z_axis``.
 
     Each cluster's contribution is obtained by trilinear interpolation on the
     cluster's native H_{comp} P-sub-grid using coordinate-based weights
@@ -691,8 +698,24 @@ def lebedev_B_on_z_axis(
     comp: int = 0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    Compute the correct Lebedev-averaged B_{comp} on the z-axis using
-    four separate cluster solutions (DDH03's proper multi-cluster approach).
+    Compute the Lebedev-averaged B_{comp} on the z-axis from four cluster
+    solutions (DDH03's multi-cluster approach for ISOTROPIC media).
+
+    .. warning::
+        **Anisotropic media (off-diagonal σ): use the coupled solve.**
+        When σ has off-diagonal entries, the clusters couple, and a solve
+        driven by a single cluster's source deposits part of its response —
+        in particular the anisotropy-generated CROSS-components (e.g. B_xz
+        from an x-dipole) — on the PARTNER clusters' sub-grids.  Reading
+        each solution only on its own source-cluster's sub-grid (as this
+        function does when given four per-cluster-source solutions)
+        under-counts those cross-components, up to losing them entirely in
+        a homogeneous tilted-anisotropic medium.  For anisotropic media,
+        obtain B from the single coupled solve
+        (``LebedevMaxwellSolver.solve_coupled`` or an all-cluster RHS) and
+        pass the SAME B vector for every cluster key — then this function's
+        per-sub-grid interpolation and averaging are correct.  See
+        ``tests/test_anisotropic_coupling.py``.
 
     Each cluster's B-field is interpolated to the receiver position from its
     OWN native H_{comp} sub-grid using coordinate-based trilinear weights

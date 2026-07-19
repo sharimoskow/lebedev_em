@@ -209,6 +209,14 @@ build the z-grid so the source lands on a node.
 
 #### 7.2 Multi-cluster B-field averaging
 
+**Anisotropic media: solve coupled.** With off-diagonal σ the clusters
+couple, and the correct procedure is a single coupled solve with
+all-cluster sources (`solve_coupled`), whose B-vector is then averaged over
+the four sub-grids by the extraction below. Four separate per-cluster-source
+solves, each read on its own sub-grid, under-count anisotropy-generated
+cross-components (they live partly on partner clusters' sub-grids) — see
+`tests/test_anisotropic_coupling.py`.
+
 After solving, B is computed from Faraday's law, `B = (1/iω) ∇×E`. To extract
 the physically correct field, `lebedev_B_on_z_axis` /
 `extract_B_on_axis_multicl` perform the proper Lebedev inter-cluster average:

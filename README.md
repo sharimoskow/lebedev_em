@@ -88,6 +88,21 @@ z_ax, Bxx = extract_axis_response(grid, result, comp='xx')
 
 ---
 
+## Anisotropic media: use the coupled solve
+
+When σ has off-diagonal entries (tilted anisotropy, homogenized interface
+cells), the four Lebedev clusters couple, and the solve must be coupled:
+use `LebedevMaxwellSolver.solve_coupled` (or an all-cluster RHS with the
+component-aware boundary conditions). The historical four-separate-solves
+procedure — one solve per cluster source, each read on its own sub-grid —
+is exact for isotropic media but **under-counts anisotropy-generated
+cross-components** (e.g. B_xz from an x-directed dipole), because the
+coupling deposits part of the response on partner clusters' sub-grids; in a
+homogeneous tilted anisotropic medium the cross-component is lost entirely.
+`tests/test_anisotropic_coupling.py` locks in both behaviors. The correct
+generalization of the four-solve mixed-BC averaging to coupled clusters
+(retaining its boundary-error cancellation) is work in progress.
+
 ## Benchmarks
 
 Two benchmarks are validated in absolute units (unit dipole moment, SI, no
