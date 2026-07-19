@@ -126,40 +126,42 @@ def plot():
     print("available:", {m: avail[m] for m in methods})
 
     fig, ax = plt.subplots(1, 2, figsize=(12, 4.8))
-    # Panel A: Im B_z profiles at the finest grid per method
+    # finest grid common to all three methods -> the convergence "truth"
+    Mtruth = min(avail[m][-1] for m in methods if avail[m])
+    truth = np.mean([store[f"{m}_M{Mtruth}"] for m in methods], axis=0)
+    peak = np.abs(truth).max()
+    msk = np.abs(truth) > 0.05 * peak
+
+    # Panel A: Im B_z profiles at the truth grid per method
     for m in methods:
         if not avail[m]:
             continue
-        Mf = avail[m][-1]
-        ax[0].plot(recv, store[f"{m}_M{Mf}"], "o-", color=col[m], ms=4,
-                   label=f"{m} (M={Mf})")
+        ax[0].plot(recv, store[f"{m}_M{Mtruth}"], "o-", color=col[m], ms=4,
+                   label=f"{m} (M={Mtruth})")
     ax[0].axvline(Z_CROSS, color="gray", ls=":", label="interface on axis")
     ax[0].set_xlabel("z (m)"); ax[0].set_ylabel(r"Im $B_z$ (nT)")
-    ax[0].set_title("Finest-grid profiles"); ax[0].grid(alpha=0.3)
-    ax[0].legend(fontsize=8)
+    ax[0].set_title(f"Profiles at the truth grid (M={Mtruth})")
+    ax[0].grid(alpha=0.3); ax[0].legend(fontsize=8)
 
-    # Panel B: do the methods converge to a COMMON field?  Max relative
-    # difference between methods over the profile, vs h.
-    common_M = sorted(set(avail["pointwise"]) & set(avail["backus"])
-                      & set(avail["nodal"]))
-    pairs = [("backus", "pointwise", "tab:red"),
-             ("nodal", "pointwise", "tab:green"),
-             ("nodal", "backus", "tab:purple")]
-    for a, b_, c in pairs:
-        hs, ds = [], []
-        for M in common_M:
-            pa, pb = store[f"{a}_M{M}"], store[f"{b_}_M{M}"]
-            ref = store[f"pointwise_M{M}"]
-            msk = np.abs(ref) > 0.05 * np.abs(ref).max()
-            hs.append(float(store[f"{a}_M{M}_h"][0]))
-            ds.append(np.max(np.abs(pa[msk] - pb[msk]) / np.abs(ref[msk])) * 100)
-        ax[1].plot(hs, ds, "o-", color=c, label=f"{a} vs {b_}")
+    # Panel B: convergence of each method to the M=Mtruth reference.
+    # error(h) = relative L2 over significant receivers vs the truth field.
+    def relL2(a):
+        return np.sqrt(np.sum(np.abs(a[msk] - truth[msk])**2) /
+                       np.sum(np.abs(truth[msk])**2)) * 100
+    for m in methods:
+        if not avail[m]:
+            continue
+        Ms = [M for M in avail[m] if M < Mtruth]
+        hs = [float(store[f"{m}_M{M}_h"][0]) for M in Ms]
+        er = [relL2(store[f"{m}_M{M}"]) for M in Ms]
+        ax[1].loglog(hs, er, "o-", color=col[m], label=m)
+    # first-order reference slope
+    hr = np.array([0.13, 0.06])
+    ax[1].loglog(hr, 60 * hr, "k:", lw=1, label="O(h) ref")
     ax[1].set_xlabel("grid spacing h (m)")
-    ax[1].set_ylabel("max relative difference between methods (%)")
-    ax[1].set_title("Methods converge to a common field (h → 0)")
-    ax[1].grid(alpha=0.3); ax[1].legend(fontsize=8)
-    ax[1].invert_xaxis()
-    ax[1].set_ylim(bottom=0)
+    ax[1].set_ylabel(f"rel. L2 error vs M={Mtruth} truth (%)")
+    ax[1].set_title(f"Convergence to the finest-grid truth (M={Mtruth})")
+    ax[1].grid(alpha=0.3, which="both"); ax[1].legend(fontsize=8)
 
     fig.suptitle(f"Tilted 75° isotropic interface (σ1={SIG1}, σ2=σ1/200), "
                  "coupled solve — refinement as ground truth", fontsize=11)
