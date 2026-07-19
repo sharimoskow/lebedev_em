@@ -130,7 +130,11 @@ def plot():
     Mtruth = min(avail[m][-1] for m in methods if avail[m])
     truth = np.mean([store[f"{m}_M{Mtruth}"] for m in methods], axis=0)
     peak = np.abs(truth).max()
-    msk = np.abs(truth) > 0.05 * peak
+    # error measured AWAY from the source (near-source receivers are erratic and
+    # dominated by the source approximation); keep the interface + past-interface
+    # band, magnitude-weighted so the tiny far-field tail adds no noise.
+    Z_ERR_MIN = 0.9
+    msk = (np.abs(truth) > 0.05 * peak) & (recv >= Z_ERR_MIN)
 
     # Panel A: Im B_z profiles at the truth grid per method
     for m in methods:
@@ -160,7 +164,7 @@ def plot():
     ax[1].loglog(hr, 60 * hr, "k:", lw=1, label="O(h) ref")
     ax[1].set_xlabel("grid spacing h (m)")
     ax[1].set_ylabel(f"rel. L2 error vs M={Mtruth} truth (%)")
-    ax[1].set_title(f"Convergence to the finest-grid truth (M={Mtruth})")
+    ax[1].set_title(f"Convergence to truth, z ≥ {Z_ERR_MIN} m (away from source)")
     ax[1].grid(alpha=0.3, which="both"); ax[1].legend(fontsize=8)
 
     fig.suptitle(f"Tilted 75° isotropic interface (σ1={SIG1}, σ2=σ1/200), "
