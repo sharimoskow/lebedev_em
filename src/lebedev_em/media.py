@@ -1875,6 +1875,96 @@ def _standard_backus_tensor_3d(
     return sigma_para * np.eye(3, dtype=complex) + (sigma_perp - sigma_para) * (n @ n.T)
 
 
+def _anisotropic_backus_tensor_3d(
+    sigma1,
+    sigma2,
+    f_vol: float,
+    n_hat: np.ndarray,
+) -> np.ndarray:
+    """
+    Correct **anisotropic** Backus / laminate homogenization (DDH03 eq. 9) for
+    a planar interface (normal n̂) between two possibly-anisotropic media σ₁, σ₂
+    with volume fractions f_vol, 1−f_vol.
+
+    Unlike :func:`_standard_backus_tensor_3d` — which takes scalar volume
+    averages ⟨σ⟩, ⟨σ⁻¹⟩ and is therefore only correct when both media are
+    isotropic — this uses the full tensors.  It applies the classical laminate
+    (series in the normal direction, parallel in the tangential plane) in the
+    (m̂, q̂, n̂) frame using the tensor block form (Backus 1962; Habashy et al.
+    1993; DDH03 eq. 9).  For a transversely-isotropic layer whose symmetry axis
+    is the interface normal (σ_nn = σ_N ≪ σ_T), the effective normal
+    conductivity is the *harmonic* mean of σ_nn — collapsing the layer to
+    ⅓·tr σ (as the scalar path does) badly over-states it.
+
+    Reduces to :func:`_standard_backus_tensor_3d` when σ₁, σ₂ are scalar, and
+    equals :func:`_nodal_eff_tensor_general` evaluated with symmetric line
+    fractions (f_line = f_vol along every axis) — i.e. the continuum limit of
+    the nodal tensor, with no finite-difference (line-average) correction.
+
+    Parameters
+    ----------
+    sigma1, sigma2 : (3,3) complex ndarray or scalar
+        Conductivity tensors of the two media (scalars broadcast to s·I).
+        Region 1 has volume fraction *f_vol*.
+    f_vol : float
+        Volume fraction of region 1 in the (reaction-cell) control volume.
+    n_hat : (3,) float
+        Unit interface normal.
+
+    Returns
+    -------
+    ΣB : (3,3) complex ndarray
+    """
+    def _to_tensor(s):
+        s = np.asarray(s, dtype=complex)
+        if s.ndim == 0 or s.shape == ():
+            return complex(s) * np.eye(3, dtype=complex)
+        if s.shape == (1,):
+            return complex(s[0]) * np.eye(3, dtype=complex)
+        return s.reshape(3, 3)
+
+    s1 = _to_tensor(sigma1)
+    s2 = _to_tensor(sigma2)
+    n = np.asarray(n_hat, dtype=float)
+    n = n / np.linalg.norm(n)
+
+    # Orthonormal tangential frame {m̂, q̂} ⟂ n̂
+    idx = int(np.argmin(np.abs(n)))
+    v = np.zeros(3); v[idx] = 1.0
+    m = v - np.dot(v, n) * n
+    m /= np.linalg.norm(m)
+    q = np.cross(n, m); q /= np.linalg.norm(q)
+    R = np.column_stack([m, q, n]).astype(complex)      # frame → xyz (columns)
+
+    # Rotate each medium into the (m̂, q̂, n̂) frame
+    A1 = R.T @ s1 @ R
+    A2 = R.T @ s2 @ R
+    w1, w2 = complex(f_vol), complex(1.0 - f_vol)
+
+    TT1, TT2 = A1[:2, :2], A2[:2, :2]     # tangential 2×2 blocks
+    TN1, TN2 = A1[:2, 2], A2[:2, 2]       # tangential–normal 2-vectors
+    NN1, NN2 = A1[2, 2], A2[2, 2]         # normal scalars
+
+    if abs(NN1) < 1e-30 or abs(NN2) < 1e-30:
+        # Degenerate normal conductivity — fall back to arithmetic average.
+        return w1 * s1 + w2 * s2
+
+    invNN = w1 / NN1 + w2 / NN2           # ⟨σ_nn⁻¹⟩
+    NN = 1.0 / invNN                      # Σ_NN = harmonic mean of σ_nn
+    TNn = w1 * TN1 / NN1 + w2 * TN2 / NN2  # ⟨σ_TN σ_nn⁻¹⟩
+    TNe = TNn * NN                        # Σ_TN
+    TTe = (w1 * TT1 + w2 * TT2)          \
+        - (w1 * np.outer(TN1, TN1) / NN1 + w2 * np.outer(TN2, TN2) / NN2) \
+        + np.outer(TNn, TNn) * NN         # Σ_TT (Schur-corrected)
+
+    B = np.zeros((3, 3), dtype=complex)
+    B[:2, :2] = TTe
+    B[:2, 2] = TNe
+    B[2, :2] = TNe
+    B[2, 2] = NN
+    return R @ B @ R.T
+
+
 # ---------------------------------------------------------------------------
 # Fine-grid upscaling — public factory
 # ---------------------------------------------------------------------------
@@ -2430,7 +2520,40 @@ def from_sigma_func(
                 continue
 
             if method == "backus":
-                t = _standard_backus_tensor_3d(sigma_arith, inv_sigma_vol, n_hat)
+                # Correct ANISOTROPIC laminate (DDH03 eq. 9), averaged over the
+                # width-h Voronoi reaction cell — the σ̇E mass-term control
+                # volume — NOT the 2h centered-difference stencil box used for
+                # the (gradient-based) nodal line averages.
+                xv_lo = 0.5 * (float(x_fd[max(i - 1, 0)]) + x_node)
+                xv_hi = 0.5 * (x_node + float(x_fd[min(i + 1, len(x_fd) - 1)]))
+                yv_lo = 0.5 * (float(y_fd[max(j - 1, 0)]) + y_node)
+                yv_hi = 0.5 * (y_node + float(y_fd[min(j + 1, len(y_fd) - 1)]))
+                zv_lo = 0.5 * (float(z_fd[max(k - 1, 0)]) + z_node)
+                zv_hi = 0.5 * (z_node + float(z_fd[min(k + 1, len(z_fd) - 1)]))
+                _mx = (x_svd >= xv_lo - 1e-12) & (x_svd <= xv_hi + 1e-12)
+                _my = (y_svd >= yv_lo - 1e-12) & (y_svd <= yv_hi + 1e-12)
+                _mz = (z_svd >= zv_lo - 1e-12) & (z_svd <= zv_hi + 1e-12)
+                _voro = _mx[:, None, None] & _my[None, :, None] & _mz[None, None, :]
+                if not _voro.any():
+                    _voro = np.ones(block_svd.shape, dtype=bool)
+
+                if _func_is_tensor and _block_tensor_svd is not None:
+                    _sig_mid = 0.5 * (block_svd.max() + block_svd.min())
+                    _binary = block_svd >= _sig_mid
+                    _mask1, _mask2 = ~_binary, _binary   # region 1 = lower σ
+                    if _mask1.any() and _mask2.any():
+                        _s1 = np.mean(_block_tensor_svd[_mask1], axis=0)
+                        _s2 = np.mean(_block_tensor_svd[_mask2], axis=0)
+                        _fv = float((_mask1 & _voro).sum()) / float(_voro.sum())
+                        t = _anisotropic_backus_tensor_3d(_s1, _s2, _fv, n_hat)
+                    else:
+                        _set_diagonal(seq, s_xx, s_yy, s_zz)
+                        continue
+                else:
+                    _bc_v = _block_c[_voro]
+                    _sa_v = complex(np.mean(_bc_v))
+                    _iv_v = complex(np.mean(1.0 / _bc_v))
+                    t = _standard_backus_tensor_3d(_sa_v, _iv_v, n_hat)
             else:   # "nodal"
                 if _func_is_tensor and _block_tensor_svd is not None:
                     # ── Tensor-valued callable ────────────────────────────────
@@ -2826,9 +2949,17 @@ def from_geometry_func(
     iso_tol: float = 1e-6,
     svd_fallback: bool = True,
     svd_isotropy_tol: float = 0.7,
+    method: str = "nodal",
 ) -> "EMMedia":
     """
     Build an :class:`EMMedia` using analytically known interface geometry.
+
+    ``method`` selects the effective-medium formula for straddling cells:
+    ``"nodal"`` (default) the Moskow energy-matched tensor; ``"backus"`` the
+    correct anisotropic laminate (DDH03 eq. 9) with volume fractions taken over
+    the width-h Voronoi reaction cell — used for single-interface cells, with
+    multi-interface cells falling back to the sequential nodal path;
+    ``"pointwise"`` no averaging (each node keeps its material tensor).
 
     This is the "perfect geometry" companion to :func:`from_sigma_func`.
     The user supplies:
@@ -2927,6 +3058,11 @@ def from_geometry_func(
         sigma_func(np.array([[[0.0]]]), np.array([[[0.0]]]), np.array([[[0.0]]]))
     )
     _func_is_tensor = (_probe.ndim >= 2 and _probe.shape[-2:] == (3, 3))
+
+    if method not in ("nodal", "backus", "pointwise"):
+        raise ValueError(
+            f"method must be 'nodal', 'backus', or 'pointwise'; got {method!r}"
+        )
 
     N_R = grid.N_R
     x_fd, y_fd, z_fd = grid.x, grid.y, grid.z
@@ -3050,6 +3186,60 @@ def from_geometry_func(
         if block_svd.max() - block_svd.min() < 1e-14 * (abs(block_svd.min()) + 1.0):
             continue  # truly uniform — pointwise is correct
 
+        if method == "pointwise":
+            continue  # keep the pointwise material tensor already stored
+
+        # ── Backus: correct anisotropic laminate over the Voronoi reaction cell ─
+        # Single-interface cells use the analytic normal directly; multi-
+        # interface cells fall through to the sequential nodal path below.
+        # Backus (eq. 9) applies to a two-material laminate: a single interface,
+        # OR several MUTUALLY PARALLEL interfaces (a thin slab of one material
+        # between two parallel faces — still a two-material cell).  Genuinely
+        # distinct (non-parallel) interfaces fall through to the nodal path.
+        _backus_ok = method == "backus" and all(
+            abs(float(np.dot(normals_list[0], nb))) > 0.99 for nb in normals_list
+        )
+        if _backus_ok:
+            _n_b = normals_list[0]
+            _sig_mid = 0.5 * (block_svd.max() + block_svd.min())
+            _binary = block_svd >= _sig_mid
+            _m1, _m2 = ~_binary, _binary          # region 1 = lower σ
+            if _m1.any() and _m2.any():
+                # Volume fraction over the width-h Voronoi (reaction) cell.
+                xv_lo = 0.5 * (float(x_fd[max(i - 1, 0)]) + x_node)
+                xv_hi = 0.5 * (x_node + float(x_fd[min(i + 1, len(x_fd) - 1)]))
+                yv_lo = 0.5 * (float(y_fd[max(j - 1, 0)]) + y_node)
+                yv_hi = 0.5 * (y_node + float(y_fd[min(j + 1, len(y_fd) - 1)]))
+                zv_lo = 0.5 * (float(z_fd[max(k - 1, 0)]) + z_node)
+                zv_hi = 0.5 * (z_node + float(z_fd[min(k + 1, len(z_fd) - 1)]))
+                _bx = (x_svd >= xv_lo - 1e-12) & (x_svd <= xv_hi + 1e-12)
+                _by = (y_svd >= yv_lo - 1e-12) & (y_svd <= yv_hi + 1e-12)
+                _bz = (z_svd >= zv_lo - 1e-12) & (z_svd <= zv_hi + 1e-12)
+                _voro = _bx[:, None, None] & _by[None, :, None] & _bz[None, None, :]
+                if not _voro.any():
+                    _voro = np.ones(block_svd.shape, dtype=bool)
+                if _func_is_tensor and _block_tensor is not None:
+                    _s1 = np.mean(_block_tensor[_m1], axis=0)
+                    _s2 = np.mean(_block_tensor[_m2], axis=0)
+                else:
+                    _s1 = complex(np.mean(_block_c[_m1]))
+                    _s2 = complex(np.mean(_block_c[_m2]))
+                _fv = float((_m1 & _voro).sum()) / float(_voro.sum())
+                t_b = _anisotropic_backus_tensor_3d(_s1, _s2, _fv, _n_b)
+                if np.all(np.isfinite(t_b)):
+                    tb_diag = np.array([t_b[0, 0], t_b[1, 1], t_b[2, 2]])
+                    if (abs(tb_diag - tb_diag.mean()).sum()
+                            + np.linalg.norm(t_b - np.diag(tb_diag))
+                            < iso_tol * abs(tb_diag.mean()) + 1e-300):
+                        sigma_R_scalar[seq] = tb_diag.mean()
+                        if sigma_R_tensor is not None:
+                            sigma_R_tensor[seq] = tb_diag.mean() * np.eye(3, dtype=complex)
+                    else:
+                        _alloc_tensor_if_needed()
+                        sigma_R_tensor[seq] = t_b
+                    continue
+            # degenerate → fall through to nodal
+
         # ── Compute effective tensor via nodal homogenization ─────────────────
         try:
             t = _nodal_from_normals(
@@ -3093,6 +3283,132 @@ def from_geometry_func(
     mu_P  = np.full(grid.N_P, complex(mu))
     eps_R = np.full(N_R,      complex(eps))
     return EMMedia(grid, sigma_R_out, mu_P, eps_R)
+
+
+def from_geometry_exact(
+    grid: "LebedevGrid3D",
+    sigma_func,
+    geometry,
+    method: str = "backus",
+    h_svd: float = 0.02,
+    mu: float = MU0,
+    eps: float = EPS0,
+    iso_tol: float = 1e-6,
+) -> "EMMedia":
+    """
+    Exact-geometry medium builder that feeds the averaging core CLEAN data.
+
+    Unlike :func:`from_geometry_func` (which takes only the interface *normal*
+    from the geometry and then reconstructs materials and fractions by
+    binarising a sampled sub-block on trace(σ)/3 — lumping distinct materials
+    whose conductivities happen to be close), this path uses the geometry to
+    *classify* every sub-voxel into its exact material region, reads the exact
+    material tensor of each region, and computes exact volume fractions and the
+    exact interface normals.  Multi-material cells are laminated recursively:
+    the region is split by its innermost straddled boundary, each side is
+    homogenised (recursively) first, and the two sides are combined **last**
+    across the innermost normal — the notes' "outer materials first" order.
+
+    ``method``: ``"pointwise"`` (node material), ``"backus"`` (eq. 9 laminate,
+    over the width-h Voronoi reaction cell — bound-preserving at every step, so
+    the effective tensor can never leave the constituent eigenvalue range), or
+    ``"nodal"`` (currently delegates to :func:`from_geometry_func`; the
+    reaction-cell nodal reformulation is in progress).
+
+    Parameters
+    ----------
+    grid : LebedevGrid3D
+    sigma_func : callable  ``(X, Y, Z) -> (...,3,3)`` tensor or ``(...)`` scalar.
+    geometry : GeometryStack   (must implement ``straddling_boundaries`` and
+        boundaries with ``side`` / ``normal_at``).
+    method : {"pointwise", "backus", "nodal"}
+    h_svd : float   Sub-voxel spacing [m] for classification / fractions.
+    """
+    if method not in ("pointwise", "backus", "nodal"):
+        raise ValueError(f"method must be 'pointwise', 'backus', or 'nodal'; got {method!r}")
+    if method == "nodal":
+        # The reaction-cell nodal reformulation is not yet settled; use the
+        # existing exact-normal nodal path so the method remains available.
+        return from_geometry_func(grid, sigma_func, geometry.interface_func,
+                                  h_svd=h_svd, mu=mu, eps=eps, iso_tol=iso_tol,
+                                  method="nodal")
+
+    N_R = grid.N_R
+    x_fd, y_fd, z_fd = grid.x, grid.y, grid.z
+
+    _probe = np.asarray(sigma_func(np.array([[[0.0]]]), np.array([[[0.0]]]),
+                                   np.array([[[0.0]]])))
+    _is_tensor = (_probe.ndim >= 2 and _probe.shape[-2:] == (3, 3))
+
+    def _mat_at(x, y, z):
+        v = np.asarray(sigma_func(np.array([[[x]]]), np.array([[[y]]]),
+                                  np.array([[[z]]])), dtype=complex)
+        return v.reshape(3, 3) if _is_tensor else complex(v.reshape(())) * np.eye(3, dtype=complex)
+
+    sigma_R = np.zeros((N_R, 3, 3), dtype=complex)
+
+    def _recurse(sig, px, py, pz, ids, boundaries, node):
+        """Effective (Backus) tensor of the sub-voxels *ids*, laminating
+        across *boundaries* (innermost first) with bound-preserving eq. (9)."""
+        s0 = sig[ids[0]]
+        if np.abs(sig[ids] - s0).max() < 1e-12:
+            return s0                                  # uniform region
+        if not boundaries:
+            return sig[ids].mean(axis=0)               # (shouldn't happen)
+        b0 = boundaries[0]
+        outside = b0.side(px[ids], py[ids], pz[ids])   # True = outer side
+        inside = ~outside
+        if inside.all() or outside.all():
+            return _recurse(sig, px, py, pz, ids, boundaries[1:], node)
+        Sin = _recurse(sig, px, py, pz, ids[inside], boundaries[1:], node)
+        Sout = _recurse(sig, px, py, pz, ids[outside], boundaries[1:], node)
+        f_in = float(inside.mean())
+        return _anisotropic_backus_tensor_3d(Sin, Sout, f_in, b0.normal_at(node))
+
+    for seq, (i, j, k) in enumerate(grid.R_nodes):
+        xn, yn, zn = float(x_fd[i]), float(y_fd[j]), float(z_fd[k])
+        bmin = np.array([float(x_fd[max(i - 1, 0)]), float(y_fd[max(j - 1, 0)]),
+                         float(z_fd[max(k - 1, 0)])])
+        bmax = np.array([float(x_fd[min(i + 1, len(x_fd) - 1)]),
+                         float(y_fd[min(j + 1, len(y_fd) - 1)]),
+                         float(z_fd[min(k + 1, len(z_fd) - 1)])])
+        node = np.array([xn, yn, zn])
+
+        straddled = geometry.straddling_boundaries(bmin, bmax, node)
+        if method == "pointwise" or not straddled:
+            sigma_R[seq] = _mat_at(xn, yn, zn)
+            continue
+
+        # width-h Voronoi reaction cell
+        xlo, xhi = 0.5 * (bmin[0] + xn), 0.5 * (xn + bmax[0])
+        ylo, yhi = 0.5 * (bmin[1] + yn), 0.5 * (yn + bmax[1])
+        zlo, zhi = 0.5 * (bmin[2] + zn), 0.5 * (zn + bmax[2])
+        nx = max(3, int(np.ceil((xhi - xlo) / h_svd)) + 1)
+        ny = max(3, int(np.ceil((yhi - ylo) / h_svd)) + 1)
+        nz = max(3, int(np.ceil((zhi - zlo) / h_svd)) + 1)
+        cap = 60_000
+        if nx * ny * nz > cap:
+            s = (nx * ny * nz / cap) ** (1 / 3)
+            nx, ny, nz = max(3, int(nx / s)), max(3, int(ny / s)), max(3, int(nz / s))
+        xs = np.linspace(xlo, xhi, nx); ys = np.linspace(ylo, yhi, ny); zs = np.linspace(zlo, zhi, nz)
+        Xg, Yg, Zg = np.meshgrid(xs, ys, zs, indexing="ij")
+        raw = np.asarray(sigma_func(Xg, Yg, Zg), dtype=complex)
+        if _is_tensor:
+            sig = raw.reshape(-1, 3, 3)
+        else:
+            sig = (raw.reshape(-1)[:, None, None] * np.eye(3, dtype=complex)[None])
+        px, py, pz = Xg.ravel(), Yg.ravel(), Zg.ravel()
+        ids = np.arange(px.size)
+        t = _recurse(sig, px, py, pz, ids, list(straddled), node)
+
+        td = np.array([t[0, 0], t[1, 1], t[2, 2]])
+        if abs(td - td.mean()).sum() + np.linalg.norm(t - np.diag(td)) < iso_tol * abs(td.mean()) + 1e-300:
+            sigma_R[seq] = td.mean() * np.eye(3, dtype=complex)
+        else:
+            sigma_R[seq] = t
+
+    return EMMedia(grid, sigma_R, np.full(grid.N_P, complex(mu)),
+                   np.full(N_R, complex(eps)))
 
 
 def planar_interface_isotropic(

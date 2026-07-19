@@ -100,6 +100,12 @@ class PlanarBoundary:
         """Return the interface unit normal at *node* (constant for a plane)."""
         return self.n_hat.copy()
 
+    def side(self, X, Y, Z) -> np.ndarray:
+        """Boolean array: True where n̂·x >= d (the "positive"/outer side)."""
+        t = self.n_hat[0] * np.asarray(X) + self.n_hat[1] * np.asarray(Y) \
+            + self.n_hat[2] * np.asarray(Z)
+        return t >= self.d
+
     def __repr__(self) -> str:
         return (f"PlanarBoundary(n_hat={np.round(self.n_hat,4).tolist()}, "
                 f"d={self.d:.6g})")
@@ -157,6 +163,10 @@ class CylindricalBoundary:
             return np.array([1.0, 0.0, 0.0])
         return np.array([node[0] / r, node[1] / r, 0.0])
 
+    def side(self, X, Y, Z) -> np.ndarray:
+        """Boolean array: True where sqrt(x²+y²) >= radius (outside)."""
+        return np.hypot(np.asarray(X), np.asarray(Y)) >= self.radius
+
     def __repr__(self) -> str:
         return f"CylindricalBoundary(radius={self.radius:.6g})"
 
@@ -205,6 +215,11 @@ class SphericalBoundary:
         if r < 1e-12:
             return np.array([1.0, 0.0, 0.0])
         return node / r
+
+    def side(self, X, Y, Z) -> np.ndarray:
+        """Boolean array: True where |x| >= radius (outside)."""
+        return np.sqrt(np.asarray(X) ** 2 + np.asarray(Y) ** 2
+                       + np.asarray(Z) ** 2) >= self.radius
 
     def __repr__(self) -> str:
         return f"SphericalBoundary(radius={self.radius:.6g})"
@@ -286,6 +301,30 @@ class GeometryStack:
         if len(normals) == 1:
             return normals[0]
         return normals
+
+    def classify(self, X, Y, Z) -> np.ndarray:
+        """
+        Exact geometric region label for each point.
+
+        Each boundary contributes one bit (its :meth:`side`); the integer
+        formed from the bits of all boundaries (innermost = least-significant)
+        is a unique label per geometric region.  Two points with the same
+        label lie in the same material region — regardless of how close their
+        conductivities are — so this never lumps distinct materials the way a
+        conductivity threshold does.
+
+        Returns an integer array shaped like the broadcast of X, Y, Z.
+        """
+        X = np.asarray(X); Y = np.asarray(Y); Z = np.asarray(Z)
+        shape = np.broadcast(X, Y, Z).shape
+        label = np.zeros(shape, dtype=np.int64)
+        for bit, b in enumerate(self.boundaries):
+            label = label | (b.side(X, Y, Z).astype(np.int64) << bit)
+        return label
+
+    def straddling_boundaries(self, bmin, bmax, node) -> list:
+        """List of boundaries (innermost first) that the cell straddles."""
+        return [b for b in self.boundaries if b.straddles(bmin, bmax, node)]
 
     def __repr__(self) -> str:
         lines = ["GeometryStack(["]
