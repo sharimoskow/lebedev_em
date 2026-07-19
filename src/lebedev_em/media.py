@@ -127,6 +127,32 @@ class EMMedia:
     def is_isotropic(self) -> bool:
         return self.sigma_R.ndim == 1 and self.mu_P.ndim == 1
 
+    @property
+    def has_offdiagonal_sigma(self) -> bool:
+        """
+        True if any conductivity tensor carries an off-diagonal entry above
+        1e-12 of the largest diagonal entry.  Off-diagonal sigma couples the
+        four Lebedev clusters, so the COUPLED solve must be used
+        (``LebedevMaxwellSolver.solve_coupled`` / ``solve(method='coupled')``);
+        the legacy clustered procedure under-counts cross-components in that
+        case.  Scalar (per-node isotropic) storage always returns False.
+        Note that even models built from isotropic materials acquire
+        off-diagonal entries wherever homogenization meets a tilted or
+        curved interface.
+        """
+        if self.sigma_R.ndim == 1:
+            return False
+        diag_max = max(
+            float(np.abs(self.sigma_R[:, i, i]).max()) for i in range(3)
+        )
+        if diag_max == 0.0:
+            return False
+        off_max = max(
+            float(np.abs(self.sigma_R[:, i, j]).max())
+            for i in range(3) for j in range(3) if i != j
+        )
+        return off_max > 1e-12 * diag_max
+
     # ------------------------------------------------------------------
     # Material matrices for the system assembler
     # ------------------------------------------------------------------

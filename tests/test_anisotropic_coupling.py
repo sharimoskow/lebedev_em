@@ -136,3 +136,22 @@ def test_isotropic_limit_coupled_equals_clustered():
     bx_clustered = np.mean(vals).imag
 
     assert abs(bx_coupled - bx_clustered) < 5e-2 * abs(bx_coupled)
+
+
+def test_media_property_and_clustered_warning():
+    # scalar storage: no coupling flag
+    grid = symmetric_uniform_grid(Mx=6, My=6, Mz=6, Lx=3, Ly=3, Lz=3)
+    med_iso = _media(grid, 0.2 * np.eye(3))
+    assert not med_iso.has_offdiagonal_sigma  # diagonal tensor storage
+    med_tilt = _media(grid, SIG_TILTED)
+    assert med_tilt.has_offdiagonal_sigma
+
+    # solve() defaults to the coupled path for coupled media
+    solver = LebedevMaxwellSolver(grid, med_tilt, OMEGA)
+    r_default = solver.solve(0.0, 0.0, 0.0, dipole_comp=0)
+    r_coupled = solver.solve_coupled(0.0, 0.0, 0.0, dipole_comp=0)
+    assert np.allclose(r_default["E_avg"], r_coupled["E_avg"])
+
+    # the legacy clustered path warns on coupled media
+    with pytest.warns(UserWarning, match="off-diagonal sigma"):
+        solver.solve_clustered(0.0, 0.0, 0.0, dipole_comp=0)

@@ -259,6 +259,13 @@ class LebedevMaxwellSolver:
         """
         Legacy four-cluster independent solve (isotropic media only).
 
+        .. warning::
+            Valid only when every material tensor is diagonal.  With
+            off-diagonal σ (tilted anisotropy, homogenized tilted/curved
+            interfaces) the clusters couple and this procedure under-counts
+            cross-components; a ``UserWarning`` is emitted in that case —
+            use ``solve_coupled`` (the default of ``solve``) instead.
+
         Solves the Maxwell system four times, once per Lebedev cluster, each
         with its own cluster-specific mixed E/M boundary conditions, and
         returns the arithmetic average of the four solutions.
@@ -278,6 +285,15 @@ class LebedevMaxwellSolver:
             'E_c'   : dict {cluster → ndarray (3·N_R,)} — per-cluster solutions.
             'rhs'   : dict {cluster → ndarray} — per-cluster RHS vectors.
         """
+        if getattr(self.media, "has_offdiagonal_sigma", False):
+            import warnings as _warnings
+            _warnings.warn(
+                "solve_clustered called on media with off-diagonal sigma: the "
+                "clusters are coupled and this procedure under-counts "
+                "cross-components (see tests/test_anisotropic_coupling.py). "
+                "Use solve_coupled / solve(method='coupled') instead.",
+                UserWarning, stacklevel=2,
+            )
         grid = self.grid
         rhs_all = point_dipole_rhs(grid, x0, y0, z0, dipole_comp, self.omega, moment)
 
