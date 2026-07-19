@@ -2940,12 +2940,10 @@ def from_geometry_func(
     Build an :class:`EMMedia` using analytically known interface geometry.
 
     ``method`` selects the effective-medium formula for straddling cells:
-    ``"nodal"`` (default) the Moskow energy-matched tensor; ``"backus"`` the
-    correct anisotropic laminate (DDH03 eq. 9) with volume fractions taken over
-    the node-centred dual cell [x_{i-1}, x_{i+1}] (the same cell DDH03 / Moskow
-    homogenize over) — used for single-interface and parallel-slab cells, with
-    genuinely multi-interface cells falling back to the sequential nodal path;
-    ``"pointwise"`` no averaging (each node keeps its material tensor).
+    ``"nodal"`` (default) the Moskow energy-matched tensor, or ``"pointwise"``
+    (no averaging — each node keeps its material tensor).  For Backus (DDH03
+    eq. 9) use :func:`from_geometry_exact`, which laminates *every* cell with
+    eq. 9 over the same dual cell — no cell-by-cell nodal hybrid.
 
     This is the "perfect geometry" companion to :func:`from_sigma_func`.
     The user supplies:
@@ -3045,9 +3043,11 @@ def from_geometry_func(
     )
     _func_is_tensor = (_probe.ndim >= 2 and _probe.shape[-2:] == (3, 3))
 
-    if method not in ("nodal", "backus", "pointwise"):
+    if method not in ("nodal", "pointwise"):
         raise ValueError(
-            f"method must be 'nodal', 'backus', or 'pointwise'; got {method!r}"
+            f"method must be 'nodal' or 'pointwise'; got {method!r}. "
+            f"For Backus (eq. 9) use from_geometry_exact, which laminates every "
+            f"cell with eq. 9 (no nodal hybrid)."
         )
 
     N_R = grid.N_R
@@ -3174,43 +3174,6 @@ def from_geometry_func(
 
         if method == "pointwise":
             continue  # keep the pointwise material tensor already stored
-
-        # ── Backus (eq. 9) over the node-centred dual cell [x_{i-1}, x_{i+1}] ──
-        # (the same averaging cell DDH03 / Moskow et al. use, and the nodal path
-        # uses).  Backus applies to a two-material laminate: a single interface,
-        # OR several MUTUALLY PARALLEL interfaces (a thin slab of one material
-        # between two parallel faces — still a two-material cell).  Genuinely
-        # distinct (non-parallel) interfaces fall through to the nodal path.
-        _backus_ok = method == "backus" and all(
-            abs(float(np.dot(normals_list[0], nb))) > 0.99 for nb in normals_list
-        )
-        if _backus_ok:
-            _n_b = normals_list[0]
-            _sig_mid = 0.5 * (block_svd.max() + block_svd.min())
-            _binary = block_svd >= _sig_mid
-            _m1, _m2 = ~_binary, _binary          # region 1 = lower σ
-            if _m1.any() and _m2.any():
-                if _func_is_tensor and _block_tensor is not None:
-                    _s1 = np.mean(_block_tensor[_m1], axis=0)
-                    _s2 = np.mean(_block_tensor[_m2], axis=0)
-                else:
-                    _s1 = complex(np.mean(_block_c[_m1]))
-                    _s2 = complex(np.mean(_block_c[_m2]))
-                _fv = float(_m1.mean())    # volume fraction over the dual cell
-                t_b = _anisotropic_backus_tensor_3d(_s1, _s2, _fv, _n_b)
-                if np.all(np.isfinite(t_b)):
-                    tb_diag = np.array([t_b[0, 0], t_b[1, 1], t_b[2, 2]])
-                    if (abs(tb_diag - tb_diag.mean()).sum()
-                            + np.linalg.norm(t_b - np.diag(tb_diag))
-                            < iso_tol * abs(tb_diag.mean()) + 1e-300):
-                        sigma_R_scalar[seq] = tb_diag.mean()
-                        if sigma_R_tensor is not None:
-                            sigma_R_tensor[seq] = tb_diag.mean() * np.eye(3, dtype=complex)
-                    else:
-                        _alloc_tensor_if_needed()
-                        sigma_R_tensor[seq] = t_b
-                    continue
-            # degenerate → fall through to nodal
 
         # ── Compute effective tensor via nodal homogenization ─────────────────
         try:

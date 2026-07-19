@@ -23,7 +23,7 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
 os.makedirs(OUT, exist_ok=True)
 
 from lebedev_em.grid import symmetric_optimal_grid, hybrid_axial_grid, C000, C101, C110, C011
-from lebedev_em.media import from_geometry_func
+from lebedev_em.media import from_geometry_exact, from_geometry_func
 from lebedev_em.geometry import CylindricalBoundary, PlanarBoundary, GeometryStack
 from lebedev_em.solver import LebedevMaxwellSolver, _component_aware_bc_dofs
 from lebedev_em.operators import apply_electric_bc
@@ -74,7 +74,12 @@ def build_grid():
 def solve(grid, with_layer, method):
     t0 = time.time()
     sf, geo = make_model(with_layer)
-    med = from_geometry_func(grid, sf, geo.interface_func, h_svd=0.025, method=method)
+    # Backus/pointwise via the clean exact core (eq. 9 everywhere, exact
+    # fractions); nodal via the exact-normal path.
+    if method in ("pointwise", "backus"):
+        med = from_geometry_exact(grid, sf, geo, method=method, h_svd=0.03)
+    else:
+        med = from_geometry_func(grid, sf, geo.interface_func, h_svd=0.025, method=method)
     solver = LebedevMaxwellSolver(grid, med, OMEGA)
     print(f"    [{method}/{'layer' if with_layer else 'nolayer'}] media+assembly {time.time()-t0:.0f}s", flush=True)
     rhs = build_rhs_per_cluster(grid, solver._C_PR, OMEGA, hx_comp=2)   # z magnetic dipole
