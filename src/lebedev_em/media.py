@@ -3356,6 +3356,50 @@ def _region_volume(bmin, bmax, constraints):
     return total
 
 
+def _line_measure(node, axis, lo, hi, constraints):
+    """
+    Length of the segment of the grid-axis line (along *axis*, through *node*,
+    over [lo, hi]) that satisfies all *constraints* — the 1-D analogue of
+    :func:`_region_volume`, used for the nodal per-axis line averages.  Returns
+    ``None`` for an unsupported constraint type.
+    """
+    from .geometry import PlanarBoundary, CylindricalBoundary
+    node = np.asarray(node, dtype=float)
+    BIG = 1e12
+    S = [(lo, hi)]
+    for b, is_in in constraints:
+        if isinstance(b, CylindricalBoundary):
+            R = b.radius
+            if axis == 2:                        # z-line: r is constant
+                r = float(np.hypot(node[0], node[1]))
+                if ((r < R) if is_in else (r >= R)) is False:
+                    return 0.0
+                continue
+            other = node[1] if axis == 0 else node[0]
+            d2 = R * R - other * other
+            s = d2 ** 0.5 if d2 > 0 else 0.0
+            cons = [(-s, s)] if is_in else [(-BIG, -s), (s, BIG)]
+            S = _intersect_intervals(S, cons)
+        elif isinstance(b, PlanarBoundary):
+            na = float(b.n_hat[axis])
+            C = float(b.n_hat @ node) - na * float(node[axis])   # n·x = na*x_axis + C
+            if abs(na) < 1e-14:
+                if ((C < b.d) if is_in else (C >= b.d)) is False:
+                    return 0.0
+                continue
+            c = (b.d - C) / na
+            if is_in:
+                cons = [(-BIG, c)] if na > 0 else [(c, BIG)]
+            else:
+                cons = [(c, BIG)] if na > 0 else [(-BIG, c)]
+            S = _intersect_intervals(S, cons)
+        else:
+            return None
+        if not S:
+            break
+    return _interval_measure(S)
+
+
 def from_geometry_exact(
     grid: "LebedevGrid3D",
     sigma_func,
@@ -3397,12 +3441,6 @@ def from_geometry_exact(
     """
     if method not in ("pointwise", "backus", "nodal"):
         raise ValueError(f"method must be 'pointwise', 'backus', or 'nodal'; got {method!r}")
-    if method == "nodal":
-        # The reaction-cell nodal reformulation is not yet settled; use the
-        # existing exact-normal nodal path so the method remains available.
-        return from_geometry_func(grid, sigma_func, geometry.interface_func,
-                                  h_svd=h_svd, mu=mu, eps=eps, iso_tol=iso_tol,
-                                  method="nodal")
 
     N_R = grid.N_R
     x_fd, y_fd, z_fd = grid.x, grid.y, grid.z
@@ -3452,6 +3490,69 @@ def from_geometry_exact(
             f_in = float(np.clip(v_in / v_cur, 0.0, 1.0))
         return _anisotropic_backus_tensor_3d(Sin, Sout, f_in, b0.normal_at(node))
 
+    def _multiregion_nodal(sig, px, py, pz, ids, active, node, bmin, bmax, cons):
+        """Direct multi-region nodal tensor for a set of *active* PARALLEL
+        boundaries (co-planar strata sharing one normal), with exact volume and
+        line fractions relative to the region defined by *cons*."""
+        nb = len(active)
+        lab = np.zeros(ids.size, dtype=np.int64)
+        for bit, b in enumerate(active):
+            lab |= (b.side(px[ids], py[ids], pz[ids]).astype(np.int64) << bit)
+        mats, keys, vols, lms = [], [], [], []
+        for L in np.unique(lab):
+            cc = cons + [(active[bit], not bool((int(L) >> bit) & 1)) for bit in range(nb)]
+            v = _region_volume(bmin, bmax, cc)
+            lm = [_line_measure(node, kk, float(bmin[kk]), float(bmax[kk]), cc) for kk in range(3)]
+            if v is None or any(x is None for x in lm):
+                return None
+            m = sig[ids[np.where(lab == L)[0][0]]]
+            key = np.round(m, 9).tobytes()
+            if key in keys:
+                jj = keys.index(key); vols[jj] += v
+                for kk in range(3): lms[jj][kk] += lm[kk]
+            else:
+                keys.append(key); mats.append(m); vols.append(v); lms.append(list(lm))
+        vols = np.array(vols, float)
+        if vols.sum() <= 0:
+            return None
+        vfr = vols / vols.sum()
+        lf = np.array(lms, float); col = lf.sum(0, keepdims=True); col[col == 0] = 1.0
+        return _nodal_eff_tensor_multiregion(mats, vfr, lf / col, active[0].normal_at(node))
+
+    def _recurse_nodal(sig, px, py, pz, ids, boundaries, node, bmin, bmax, cons):
+        """Exact nodal tensor: co-planar (single-normal) strata use the direct
+        multi-region formula; distinct normals are laminated sequentially with
+        eq. (A.17), all with exact analytic volume/line fractions."""
+        s0 = sig[ids[0]]
+        if np.abs(sig[ids] - s0).max() < 1e-12:
+            return s0
+        active = [b for b in boundaries
+                  if b.side(px[ids], py[ids], pz[ids]).any()
+                  and (~b.side(px[ids], py[ids], pz[ids])).any()]
+        if not active:
+            return sig[ids].mean(axis=0)
+        nrm = [b.normal_at(node) for b in active]
+        if all(abs(float(np.dot(nrm[t], nrm[0]))) > 0.99 for t in range(len(active))):
+            res = _multiregion_nodal(sig, px, py, pz, ids, active, node, bmin, bmax, cons)
+            if res is not None:
+                return res
+        b0 = active[0]
+        outside = b0.side(px[ids], py[ids], pz[ids]); inside = ~outside
+        Sin = _recurse_nodal(sig, px, py, pz, ids[inside], boundaries, node,
+                             bmin, bmax, cons + [(b0, True)])
+        Sout = _recurse_nodal(sig, px, py, pz, ids[outside], boundaries, node,
+                              bmin, bmax, cons + [(b0, False)])
+        vc = _region_volume(bmin, bmax, cons)
+        vi = _region_volume(bmin, bmax, cons + [(b0, True)])
+        fl = []
+        for kk in range(3):
+            lc = _line_measure(node, kk, float(bmin[kk]), float(bmax[kk]), cons)
+            li = _line_measure(node, kk, float(bmin[kk]), float(bmax[kk]), cons + [(b0, True)])
+            fl.append(float(np.clip(li / lc, 0.0, 1.0)) if lc else float(inside.mean()))
+        f_in = (float(np.clip(vi / vc, 0.0, 1.0))
+                if (vc and vi is not None and vc > 0) else float(inside.mean()))
+        return _nodal_eff_tensor_general(Sin, Sout, f_in, np.array(fl), b0.normal_at(node))
+
     for seq, (i, j, k) in enumerate(grid.R_nodes):
         xn, yn, zn = float(x_fd[i]), float(y_fd[j]), float(z_fd[k])
         bmin = np.array([float(x_fd[max(i - 1, 0)]), float(y_fd[max(j - 1, 0)]),
@@ -3487,8 +3588,8 @@ def from_geometry_exact(
             sig = (raw.reshape(-1)[:, None, None] * np.eye(3, dtype=complex)[None])
         px, py, pz = Xg.ravel(), Yg.ravel(), Zg.ravel()
         ids = np.arange(px.size)
-        t = _recurse(sig, px, py, pz, ids, list(straddled), node,
-                     bmin, bmax, [])
+        _rec = _recurse_nodal if method == "nodal" else _recurse
+        t = _rec(sig, px, py, pz, ids, list(straddled), node, bmin, bmax, [])
 
         td = np.array([t[0, 0], t[1, 1], t[2, 2]])
         if abs(td - td.mean()).sum() + np.linalg.norm(t - np.diag(td)) < iso_tol * abs(td.mean()) + 1e-300:

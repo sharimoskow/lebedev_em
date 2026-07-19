@@ -67,3 +67,33 @@ def test_region_volume_is_exact():
     assert abs(_region_volume(bmin, bmax, [(C, True)]) - np.pi * 0.25 * 2) < 1e-6
     # unsupported (n_y != 0 plane) -> None (caller falls back)
     assert _region_volume(bmin, bmax, [(PlanarBoundary([0, 1, 0], 0.0), True)]) is None
+
+
+def test_exact_nodal_axis_aligned_reduces_to_physical_diagonal():
+    """Nodal via the exact core: for a grid-aligned layer (normal = ẑ) the
+    tensor must reduce to the arith/harmonic DIAGONAL (notes' Lemma 1) — no
+    off-diagonal, no overshoot."""
+    import numpy as np
+    from lebedev_em.grid import symmetric_uniform_grid
+    from lebedev_em.geometry import PlanarBoundary, GeometryStack
+    from lebedev_em.media import from_geometry_exact
+    NZ = np.array([0., 0., 1.]); ST, SN = 0.1, 0.1 / 50
+    SA = ST * np.eye(3) + (SN - ST) * np.outer(NZ, NZ)
+
+    def sf(X, Y, Z):
+        X = np.asarray(X, float); Y = np.asarray(Y, float); Z = np.asarray(Z, float)
+        o = np.zeros(np.broadcast(X, Y, Z).shape + (3, 3), complex); o[...] = ST * np.eye(3)
+        o[np.abs(Z + 1.0) < 0.25 / 2] = SA
+        return o
+    geo = GeometryStack([PlanarBoundary(NZ, -1.0 + 0.125), PlanarBoundary(NZ, -1.0 - 0.125)])
+    grid = symmetric_uniform_grid(12, 12, 40, 4., 4., 6.)
+    S = np.array(from_geometry_exact(grid, sf, geo, method="nodal", h_svd=0.05).sigma_R)
+    # interface cells came out anisotropic in the DIAGONAL (an axis-aligned
+    # layer produces NO off-diagonal, only σ_zz < σ_xx = σ_yy).
+    diag = np.array([np.diag(S[s]).real for s in range(len(S))])
+    an = [s for s in range(len(S)) if diag[s].max() - diag[s].min() > 1e-3]
+    assert an, "expected anisotropic interface cells"
+    for s in an:
+        assert np.abs(S[s] - np.diag(np.diag(S[s]))).max() < 1e-6      # NO off-diagonal
+        ev = np.linalg.eigvalsh(S[s].real)
+        assert ev.max() <= ST * (1 + 1e-6) and ev.min() >= SN * (1 - 1e-3)  # physical (Lemma 1)
