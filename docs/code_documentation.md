@@ -128,13 +128,14 @@ components take the arithmetic mean, the normal component the harmonic mean.
 Tilted or anisotropic interfaces require the full tensor formula and
 introduce off-diagonal entries.
 
-**The nodal scheme is not optional for thin high-contrast structures.** In
-the Fig.-9 benchmark below (0.25 m layer, 1:200 conductivity contrast), the
-standard arithmetic/harmonic averaging at the same resolution captures only a
-small fraction of the layer's effect (~8% field suppression where the
-published curves and the nodal result show ~45–47%); see
-`examples/fig9_tests.py`. This mirrors the thin-resistive-structure results
-of Moskow et al. (1999).
+**Sub-cell averaging matters for thin high-contrast structures.** A single
+grid cell that straddles a thin, strongly resistive layer must carry an
+effective tensor rather than a single node material, or the layer's effect on
+the response is under-resolved. The correct effective-medium treatment of such
+thin high-contrast strata is the regime studied by Moskow et al. (1999); the
+validation of the averaging schemes against analytic references is in
+`examples/benchmark_two_layer_averaging.py` and the tilted-layer configuration
+remains under active development.
 
 Two computational paths are supported:
 

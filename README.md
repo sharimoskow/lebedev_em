@@ -112,7 +112,7 @@ generalization of the four-solve mixed-BC averaging to coupled clusters
 
 ## Benchmarks
 
-Two benchmarks are validated in absolute units (unit dipole moment, SI, no
+These benchmarks are validated in absolute units (unit dipole moment, SI, no
 fitted constants):
 
 - **Two half-spaces (exact analytic reference).** VED over a 10× conductivity
@@ -124,25 +124,21 @@ fitted constants):
   python examples/benchmark_two_layer.py
   ```
 
-- **Thin dipping anisotropic layer (DDH03 Fig. 9 configuration).** Resistive
-  borehole crossing a 0.25 m-thick 75° dipping layer with σ_N = σ_T/200 at
-  52.65 kHz, fully coupled single solve on the k = 6 optimal grid, compared to
-  the values digitized from the published figure. Current status (an open
-  investigation, **not** a settled benchmark):
-
-  - the **pointwise** medium reproduces the published Im B_z curve;
-  - the cell-averaging schemes — the anisotropic **Backus** laminate (eq. 9) and
-    the **nodal** tensor, which nearly coincide on the shared dual cell —
-    **over-attenuate** the layer response by ~30%.
-
-  The over-attenuation has been traced to the *off-diagonal* entries of the
-  averaged effective tensor (the inter-cluster coupling of the tilted layer):
-  zeroing them recovers the pointwise result. Reconciling the coupled Lebedev
-  treatment of that coupling with the published curve is work in progress.
+- **Two half-spaces with sub-cell averaging (coupled solve).** The same
+  Sommerfeld reference, but with the contact placed mid-cell so a dual cell
+  straddles the interface and the homogenization is actually exercised. The
+  medium is built with `from_geometry_exact` for each of `pointwise`, `backus`,
+  and `nodal`, and solved with the fully coupled single solve. On the
+  transmitted (conductive) side the averaged schemes converge to the analytic
+  as the transverse grid refines — reaching ~0.01% RMS by k = 4–5, where the
+  harmonic-normal / arithmetic-transverse tensor is the physically correct
+  effective conductivity for E_z continuity across the contact; `backus` and
+  `nodal` coincide exactly for the axis-aligned normal. The source-side
+  residual is ordinary O(h_z²) axial-grid error, shared by all three schemes.
 
   ```bash
-  # coupled solve, pointwise / Backus / nodal vs the digitized figure:
-  python examples/fig9_backus_vs_paper.py run
+  python examples/benchmark_two_layer_averaging.py        # methods + coupled solve
+  python examples/two_layer_averaging_convergence.py 5    # transverse (k) convergence
   ```
 
 ## Deviated-borehole model example (media-building strategies)
