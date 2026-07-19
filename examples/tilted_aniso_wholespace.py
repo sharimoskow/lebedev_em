@@ -136,12 +136,58 @@ def main():
           f"sigma_T={SIG_T}   sigma_xz at sT/200 = {sig_of(200)[0,2]:+.5f}")
 
     # (1) dipole ALONG n: physics -> field must be INVARIANT to sigma_N
-    run_orientation(grid, NH.copy(), NH.copy(), "n (uniaxial axis)")
+    val_n, an_n = run_orientation(grid, NH.copy(), NH.copy(), "n (uniaxial axis)")
 
     # (2) CONTROL: dipole PERPENDICULAR to n (in x-z plane).  Physics -> the
     #     currents now sample sigma_N, so the field SHOULD depend on sigma_N.
     m_perp = np.array([np.cos(THETA), 0.0, -np.sin(THETA)])
-    run_orientation(grid, m_perp, m_perp, "n_perp (control, should vary)")
+    val_p, an_p = run_orientation(grid, m_perp, m_perp, "n_perp (control, should vary)")
+
+    _plot(M, val_n, an_n, val_p, an_p)
+
+
+def _plot(M, val_n, an_n, val_p, an_p):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    r = np.array(RADII)
+    ccol = {1.0: "tab:blue", 10.0: "tab:orange", 200.0: "tab:red"}
+
+    fig, ax = plt.subplots(1, 2, figsize=(12, 4.8))
+
+    # Panel A: |B.n| along the dipole axis vs analytic (along-n dipole)
+    ax[0].plot(r, an_n, "k-", lw=2, label=r"isotropic $\sigma_T$ analytic")
+    for c in CONTRASTS:
+        ax[0].plot(r, val_n[c], "o", ms=9 if c == 1.0 else 6,
+                   mfc="none" if c != 1.0 else ccol[c], color=ccol[c],
+                   label=rf"coupled FD, $\sigma_N=\sigma_T/{int(c)}$")
+    ax[0].set_xlabel("distance along axis  r (m)")
+    ax[0].set_ylabel(r"$|B\cdot\hat n|$  (T)")
+    ax[0].set_title("Dipole ‖ tilt axis: field is one curve for every "
+                    r"$\sigma_N$")
+    ax[0].grid(alpha=0.3); ax[0].legend(fontsize=8)
+
+    # Panel B: ratio to the isotropic FD — invariance vs the control
+    for c in (10.0, 200.0):
+        ax[1].plot(r, val_n[c] / val_n[1.0], "o-", color=ccol[c],
+                   label=rf"‖ axis, $\sigma_T/{int(c)}$  (should be flat=1)")
+        ax[1].plot(r, val_p[c] / val_p[1.0], "s--", color=ccol[c], alpha=0.7,
+                   label=rf"perp-axis (control), $\sigma_T/{int(c)}$")
+    ax[1].axhline(1.0, color="k", lw=0.8)
+    ax[1].set_xlabel("distance along axis  r (m)")
+    ax[1].set_ylabel(r"ratio  $|B(\sigma_N)| / |B(\sigma_N=\sigma_T)|$")
+    ax[1].set_title(r"$\sigma_N$-invariance: exact ‖ axis, drifts off perp-axis")
+    ax[1].grid(alpha=0.3); ax[1].legend(fontsize=7.5)
+
+    fig.suptitle(f"Tilted uniaxial whole-space (75°), coupled solve, "
+                 rf"$\sigma_{{xz}}=-0.025$ at $\sigma_T/200$  —  M={M} uniform grid",
+                 fontsize=11)
+    fig.tight_layout()
+    out = os.path.join(os.path.dirname(__file__), "out")
+    os.makedirs(out, exist_ok=True)
+    png = os.path.join(out, "tilted_aniso_wholespace.png")
+    fig.savefig(png, dpi=130)
+    print("figure ->", png)
 
 
 if __name__ == "__main__":
