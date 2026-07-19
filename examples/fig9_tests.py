@@ -10,7 +10,7 @@ _os.makedirs(OUT_DIR, exist_ok=True)
 
 from lebedev_em.grid import (symmetric_optimal_grid, hybrid_axial_grid,
                              C000, C101, C110, C011)
-from lebedev_em.media import from_geometry_func, from_sigma_func, MU0, EPS0
+from lebedev_em.media import from_geometry_exact, from_sigma_func, MU0, EPS0
 from lebedev_em.geometry import CylindricalBoundary, PlanarBoundary, GeometryStack
 from lebedev_em.solver import LebedevMaxwellSolver, _cluster_bc_dofs
 from lebedev_em.operators import apply_electric_bc
@@ -59,8 +59,8 @@ if sys.argv[2]=='extract':
     print(f"  geo-mean {np.exp(np.mean(np.log(rats))):.3f} log-scatter {np.std(np.log(rats)):.3f}")
 else:
     t0=time.time()
-    if variant=='shiftup':  sf,geo=model(+0.05); med=from_geometry_func(grid,sf,geo.interface_func,h_svd=0.025)
-    elif variant=='shiftdn':sf,geo=model(-0.05); med=from_geometry_func(grid,sf,geo.interface_func,h_svd=0.025)
+    if variant=='shiftup':  sf,geo=model(+0.05); med=from_geometry_exact(grid,sf,geo,method="nodal",h_svd=0.025)
+    elif variant=='shiftdn':sf,geo=model(-0.05); med=from_geometry_exact(grid,sf,geo,method="nodal",h_svd=0.025)
     elif variant=='std':    sf,_=model(0.0);     med=from_sigma_func(grid,sf,h_svd=0.025,method='backus')
     elif variant=='nodalsf':sf,_=model(0.0);     med=from_sigma_func(grid,sf,h_svd=0.025,method='nodal')
     print(f'{variant}: media t={time.time()-t0:.0f}s',flush=True)

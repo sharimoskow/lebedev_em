@@ -18,7 +18,7 @@ Quickstart
 """
 
 from .grid import LebedevGrid3D, uniform_grid, symmetric_uniform_grid, optimal_geometric_1d
-from .media import EMMedia, homogeneous_isotropic, layered_isotropic, make_sigma_func, from_fine_grid, from_sigma_func, from_geometry_func, MU0, EPS0
+from .media import EMMedia, homogeneous_isotropic, layered_isotropic, make_sigma_func, from_fine_grid, from_sigma_func, from_geometry_exact, MU0, EPS0
 from .geometry import PlanarBoundary, CylindricalBoundary, SphericalBoundary, GeometryStack
 from .operators import build_curl_RE, build_curl_PR, build_system_matrix
 from .solver import LebedevMaxwellSolver
@@ -35,7 +35,7 @@ __all__ = [
     "make_sigma_func",
     "from_fine_grid",
     "from_sigma_func",
-    "from_geometry_func",
+    "from_geometry_exact",
     "PlanarBoundary",
     "CylindricalBoundary",
     "SphericalBoundary",

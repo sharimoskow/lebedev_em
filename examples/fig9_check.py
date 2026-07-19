@@ -27,7 +27,7 @@ _os.makedirs(OUT_DIR, exist_ok=True)
 
 from lebedev_em.grid import (symmetric_optimal_grid, hybrid_axial_grid,
                              C000, C101, C110, C011)
-from lebedev_em.media import from_geometry_func, MU0, EPS0
+from lebedev_em.media import from_geometry_exact, MU0, EPS0
 from lebedev_em.geometry import CylindricalBoundary, PlanarBoundary, GeometryStack
 from lebedev_em.solver import LebedevMaxwellSolver, _cluster_bc_dofs
 from lebedev_em.operators import apply_electric_bc
@@ -69,7 +69,7 @@ def build(tag):
     z_fd = hybrid_axial_grid(-3.5, 2.5, 96, 8, GAMMA)
     grid = symmetric_optimal_grid(H_MIN, 300., z_fd, GAMMA, k=K_VAL)
     sf, geo = make_model(tag == 'layer')
-    med = from_geometry_func(grid, sf, geo.interface_func, h_svd=0.025)
+    med = from_geometry_exact(grid, sf, geo, method="nodal", h_svd=0.025)
     solver = LebedevMaxwellSolver(grid, med, OMEGA)
     print(f'{tag}: grid+media+assembly t={time.time()-t0:.0f}s', flush=True)
     return grid, solver

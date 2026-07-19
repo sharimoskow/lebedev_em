@@ -4,7 +4,7 @@ warnings.filterwarnings("ignore")
 sys.path.insert(0,"src")
 OUT="examples/out"
 from examples.fig9_backus_vs_paper import (build_grid, make_model, PAPER, OMEGA, CLUSTERS)
-from lebedev_em.media import from_geometry_func
+from lebedev_em.media import from_geometry_exact
 from lebedev_em.solver import LebedevMaxwellSolver, _component_aware_bc_dofs
 from lebedev_em.operators import apply_electric_bc
 from lebedev_em.postprocess import compute_B_from_E, build_rhs_per_cluster, lebedev_B_on_z_axis
@@ -15,7 +15,7 @@ grid=build_grid()
 print(f"grid N_R={grid.N_R}",flush=True)
 def solve(wl,method):
     t0=time.time(); sf,geo=make_model(wl)
-    med=from_geometry_func(grid,sf,geo.interface_func,h_svd=0.025,method=method)
+    med=from_geometry_exact(grid,sf,geo,method=method,h_svd=0.025)
     solver=LebedevMaxwellSolver(grid,med,OMEGA)
     rhs=build_rhs_per_cluster(grid,solver._C_PR,OMEGA,hx_comp=2)
     b=sum(rhs[c] for c in CLUSTERS)

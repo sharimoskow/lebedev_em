@@ -1,7 +1,7 @@
 import sys,time,warnings,numpy as np, scipy.sparse.linalg as spla
 warnings.filterwarnings("ignore"); sys.path.insert(0,"src")
 from lebedev_em.grid import symmetric_optimal_grid, hybrid_axial_grid, C000,C101,C110,C011
-from lebedev_em.media import from_geometry_exact, from_geometry_func
+from lebedev_em.media import from_geometry_exact
 from lebedev_em.geometry import CylindricalBoundary, PlanarBoundary, GeometryStack
 from lebedev_em.solver import LebedevMaxwellSolver, _component_aware_bc_dofs
 from lebedev_em.operators import apply_electric_bc
@@ -32,7 +32,7 @@ def solve(med):
 def factor(z,B,paper):
     r=np.array([paper[zz]/B[int(np.argmin(np.abs(z-zz)))] for zz in paper]); return r.mean(),r.std()/r.mean()
 for name,med in [("exact-BACKUS",from_geometry_exact(grid,sf,geo,method="backus",h_svd=0.03)),
-                 ("nodal",from_geometry_func(grid,sf,geo.interface_func,h_svd=0.025,method="nodal"))]:
+                 ("nodal",from_geometry_exact(grid,sf,geo,method="nodal",h_svd=0.025))]:
     t0=time.time(); z,Bxx,Bxz,info=solve(med)
     mxx,vxx=factor(z,Bxx,paper_xx); mxz,vxz=factor(z,Bxz,paper_xz)
     print(f"{name:13s} info={info} t={time.time()-t0:.0f}s | Bxx paper/ours mean={mxx:.2f} spread={100*vxx:.1f}% | Bxz mean={mxz:.2f} spread={100*vxz:.1f}%",flush=True)

@@ -1,9 +1,9 @@
 """
-lebedev_em.geometry  —  Geometry primitives for from_geometry_func.
+lebedev_em.geometry  —  Geometry primitives for from_geometry_exact.
 
 Provides a small library of boundary objects that describe material interfaces
 analytically.  A :class:`GeometryStack` combines them into an ``interface_func``
-callable ready to pass to :func:`~lebedev_em.media.from_geometry_func`.
+object ready to pass to :func:`~lebedev_em.media.from_geometry_exact`.
 
 Boundary ordering convention
 -----------------------------
@@ -32,7 +32,7 @@ Example — DDH03 four-region geometry
         CylindricalBoundary(radius=0.6),          # invasion wall
         PlanarBoundary(n_hat=N_HAT, d=-0.25),     # 60° dipping layer
     ])
-    med = from_geometry_func(grid, sigma_func, geo.interface_func)
+    med = from_geometry_exact(grid, sigma_func, geo, method="nodal")
 
 Multiple dipping planes are simply additional :class:`PlanarBoundary` entries::
 
@@ -233,9 +233,11 @@ class GeometryStack:
     """
     Ordered collection of boundary objects (innermost first).
 
-    Calling :meth:`interface_func` produces a function with signature
+    Passing the stack to :func:`~lebedev_em.media.from_geometry_exact`
+    homogenizes each straddling dual cell exactly.  (:meth:`interface_func`
+    remains as a per-cell normal callback with signature
     ``(bmin, bmax, node) → None | n̂ | [n̂₁, n̂₂, …]`` that can be passed
-    directly to :func:`~lebedev_em.media.from_geometry_func`.
+    for callers that only need per-cell normals.
 
     Parameters
     ----------

@@ -31,12 +31,13 @@ from lebedev_em.media import (
     EMMedia,
     EPS0,
     MU0,
-    from_geometry_func,
+    from_geometry_exact,
     from_sigma_func,
     homogeneous_isotropic,
     planar_interface_isotropic,
     _nodal_eff_tensor_general,
-    _nodal_from_normals,
+    _line_measure,
+    _region_volume,
     _frac_1d_layer1,
     _volume_frac_layer1_planar,
 )
@@ -153,7 +154,7 @@ class TestGeometryFuncScalarPath:
 
     def test_no_zero_or_unphysical_tensors(self, grid):
         geo = GeometryStack([PlanarBoundary(n_hat=N_HAT, d=D_PLANE)])
-        med = from_geometry_func(grid, _sf_scalar, geo.interface_func,
+        med = from_geometry_exact(grid, _sf_scalar, geo, method="nodal",
                                  h_svd=0.05)
         T = _as_tensor_field(med.sigma_R)
         diag = np.real(np.diagonal(T, axis1=1, axis2=2))
@@ -171,7 +172,7 @@ class TestGeometryFuncScalarPath:
     def test_matches_analytic_planar(self, grid):
         """Geometry path vs the analytic planar_interface_isotropic builder."""
         geo = GeometryStack([PlanarBoundary(n_hat=N_HAT, d=D_PLANE)])
-        med_g = from_geometry_func(grid, _sf_scalar, geo.interface_func,
+        med_g = from_geometry_exact(grid, _sf_scalar, geo, method="nodal",
                                    h_svd=0.02)
         med_a = planar_interface_isotropic(grid, N_HAT, D_PLANE, SIG1, SIG2,
                                            method="nodal")
@@ -187,7 +188,7 @@ class TestGeometryFuncScalarPath:
 
     def test_matches_from_sigma_func(self, grid):
         geo = GeometryStack([PlanarBoundary(n_hat=N_HAT, d=D_PLANE)])
-        med_g = from_geometry_func(grid, _sf_scalar, geo.interface_func,
+        med_g = from_geometry_exact(grid, _sf_scalar, geo, method="nodal",
                                    h_svd=0.02)
         med_s = from_sigma_func(grid, _sf_scalar, h_svd=0.02, method="nodal")
         Tg = _as_tensor_field(med_g.sigma_R)
@@ -205,48 +206,31 @@ class TestGeometryFuncScalarPath:
 # ---------------------------------------------------------------------------
 
 class TestNodeLineFractions:
-    def test_nodal_from_normals_off_centre_node(self):
-        """Direct unit test: block over a non-uniform dual cell (node NOT at
-        the box centre); line fractions must be taken through the node."""
-        # Dual cell: x in [-1, 1.4] (node at x=0 — geometric step alpha=1.4),
-        # y, z in [-1, 1] (node centred).
-        x_sub = np.linspace(-1.0, 1.4, 121)
-        y_sub = np.linspace(-1.0, 1.0, 101)
-        z_sub = np.linspace(-1.0, 1.0, 101)
+    def test_exact_line_and_volume_through_node_offcentre(self):
+        """The exact-path fraction machinery (_line_measure / _region_volume)
+        must take line averages through the NODE, not the box centre, on a
+        non-uniform dual cell — matching the analytic references exactly."""
+        # Dual cell: x in [-1, 1.4] (node at x=0, off centre); y, z in [-1, 1].
+        bmin = np.array([-1.0, -1.0, -1.0]); bmax = np.array([1.4, 1.0, 1.0])
+        node = np.array([0.0, 0.0, 0.0])
         n = np.array([1.0, 0.0, 1.0]) / np.sqrt(2.0)
         d = 0.15
-        s1, s2 = 0.2, 1.0
-        XX, YY, ZZ = np.meshgrid(x_sub, y_sub, z_sub, indexing="ij")
-        V = n[0] * XX + n[1] * YY + n[2] * ZZ
-        block = np.where(V < d, s1, s2)
+        P = PlanarBoundary(n_hat=n, d=d)                 # (P, True) = below (n·x < d)
 
-        node = np.array([0.0, 0.0, 0.0])
-        t = _nodal_from_normals(block, x_sub, y_sub, z_sub, [n],
-                                None, False, node_xyz=tuple(node))
-
-        # Exact reference: line fractions through the node, exact volume frac
-        f_line = np.empty(3)
         for ax in range(3):
-            lo = [x_sub[0], y_sub[0], z_sub[0]][ax]
-            hi = [x_sub[-1], y_sub[-1], z_sub[-1]][ax]
+            lo, hi = float(bmin[ax]), float(bmax[ax])
             rest = float(n @ node) - n[ax] * node[ax]
-            f_line[ax] = _frac_1d_layer1(lo, hi, n[ax], d - rest)
-        f_vol = _volume_frac_layer1_planar(
-            np.array([x_sub[0], y_sub[0], z_sub[0]]),
-            np.array([x_sub[-1], y_sub[-1], z_sub[-1]]), n, d)
-        t_ref = _nodal_eff_tensor_general(s1 * np.eye(3), s2 * np.eye(3),
-                                          f_vol, f_line, n)
-        assert np.abs(t - t_ref).max() / s2 < 0.03, (
-            f"node-line regression: max diff {np.abs(t - t_ref).max()}")
+            f_ref = _frac_1d_layer1(lo, hi, n[ax], d - rest)   # analytic, through node
+            f_meas = _line_measure(node, ax, lo, hi, [(P, True)]) / (hi - lo)
+            assert abs(f_meas - f_ref) < 1e-9
 
-        # Sanity: the box-centre x-line (x_mid = 0.2) gives a *different*
-        # x-line fraction than the node line, so this test is discriminating.
-        x_mid = 0.5 * (x_sub[0] + x_sub[-1])
-        f_x_centre = _frac_1d_layer1(x_sub[0], x_sub[-1], n[0],
-                                     d - n[2] * 0.0)
-        f_x_node = f_line[0]
-        assert abs(f_x_centre - f_x_node) < 1e-12  # same formula through node
-        assert abs(x_mid) > 0.1  # box centre genuinely off the node
+        v_ref = _volume_frac_layer1_planar(bmin, bmax, n, d)
+        v_meas = _region_volume(bmin, bmax, [(P, True)]) / float(np.prod(bmax - bmin))
+        assert abs(v_meas - v_ref) < 1e-6
+
+        # Discriminating: the box centre (x_mid = 0.2) is genuinely off the node,
+        # so a box-centre line average would give a different x-fraction.
+        assert abs(0.5 * (bmin[0] + bmax[0])) > 0.1
 
     def test_tensor_path_matches_scalar_path_on_geometric_grid(self):
         """from_sigma_func: tensor callable (sigma * I) must reproduce the
