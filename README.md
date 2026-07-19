@@ -35,13 +35,20 @@ Force Office of Scientific Research (**AFOSR**) on subsurface imaging.
 - **Optimal geometric grids** (Druskin & Knizhnerman 1999) — geometrically
   stretched grids in the transverse (x, y) directions achieve exponential
   convergence, keeping 3-D system sizes tractable.
-- **Flexible media builders** — specify conductivity from a callable function,
-  fine reference grid, or analytical geometry (bore / invasion / formation
-  boundaries), with automatic sub-cell homogenisation via sequential nodal
-  homogenization
+- **Two media-building paths, three averaging methods.** Build the conductivity
+  from an analytic `GeometryStack` (the **exact** path, `from_geometry_exact`)
+  or from a black-box σ(x) callable (the **lookup** path, `from_sigma_func`).
+  Each offers the same three sub-cell schemes: `pointwise` (each node takes its
+  material tensor), `backus` (the anisotropic laminate / standard homogenization,
+  DDH03 eq. 9), and `nodal` (the Moskow energy-matched tensor, extended to 3-D).
+  On the **exact** path the interface normals, per-region material tensors, and
+  volume/line fractions are all computed **analytically — no sampling** — and the
+  Backus laminate is provably *bound-preserving* (effective eigenvalues stay
+  within the constituent range). The lookup path estimates the normal by SVD and
+  the fractions by sub-grid quadrature.
 - **Geometry stack** — compose cylindrical, planar, and spherical boundaries
-  to describe layered/invaded formations; supply analytical normals for each
-  boundary to bypass numerical normal estimation
+  to describe layered/invaded formations; the exact path reads normals and exact
+  per-cell material fractions directly from this geometry.
 - **Sparse direct and iterative solvers** — wraps `scipy.sparse.linalg.spsolve`
   and `scipy.sparse.linalg.lgmres`
 - **Post-processing** — extract magnetic-field components on- and off-axis,
@@ -119,36 +126,44 @@ fitted constants):
 
 - **Thin dipping anisotropic layer (DDH03 Fig. 9 configuration).** Resistive
   borehole crossing a 0.25 m-thick 75° dipping layer with σ_N = σ_T/200 at
-  52.65 kHz, solved with the complete DDH03 methodology (eq.-7 four-cluster
-  sources, per-cluster mixed BCs, interpolate-then-average, h_min = 0.05 m,
-  sequential nodal homogenization). Matches the published curves at the
-  few-percent level. Note: at this resolution the *nodal* averaging is
-  essential — standard arithmetic/harmonic averaging captures only a small
-  fraction of the thin layer's effect (see `examples/fig9_tests.py`).
+  52.65 kHz, fully coupled single solve on the k = 6 optimal grid, compared to
+  the values digitized from the published figure. Current status (an open
+  investigation, **not** a settled benchmark):
+
+  - the **pointwise** medium reproduces the published Im B_z curve;
+  - the cell-averaging schemes — the anisotropic **Backus** laminate (eq. 9) and
+    the **nodal** tensor, which nearly coincide on the shared dual cell —
+    **over-attenuate** the layer response by ~30%.
+
+  The over-attenuation has been traced to the *off-diagonal* entries of the
+  averaged effective tensor (the inter-cluster coupling of the tilted layer):
+  zeroing them recovers the pointwise result. Reconciling the coupled Lebedev
+  treatment of that coupling with the published curve is work in progress.
 
   ```bash
-  # four cluster solves, then comparison table vs the published values:
-  python examples/fig9_check.py nolayer 0 1 2 3
-  python examples/fig9_check.py layer   0 1 2 3
-  python examples/fig9_check.py extract
+  # coupled solve, pointwise / Backus / nodal vs the digitized figure:
+  python examples/fig9_backus_vs_paper.py run
   ```
 
 ## Deviated-borehole model example (media-building strategies)
 
 The `examples/` directory also exercises a deviated-borehole model
-with different media builders: bore (r < 0.1 m, σ = 0.05 S/m), invasion zone
+(DDH03 Fig. 6/7): bore (r < 0.1 m, σ = 0.05 S/m), invasion zone
 (0.1 < r < 0.6 m, σ = 0.10 S/m), and a dipping anisotropic formation
 (60° dip; σ_T = 0.10 S/m, σ_N = 0.01 S/m below dip; σ = 0.50 S/m above dip).
 
+```python
+from lebedev_em import from_geometry_exact
+from lebedev_em.geometry import CylindricalBoundary, PlanarBoundary, GeometryStack
+
+geo = GeometryStack([CylindricalBoundary(0.1), CylindricalBoundary(0.6),
+                     PlanarBoundary(n_hat=N_HAT, d=D_PLANE)])
+med = from_geometry_exact(grid, sigma_func, geo, method="backus")   # or "nodal", "pointwise"
+```
+
 ```bash
-# Run with analytical geometry normals (fastest, most accurate):
-python examples/run_geometry_func.py
-
-# Run with SVD-based sub-cell homogenisation (sigma_func path):
-python examples/run_sigma_func_ddh03.py
-
-# Compare crossing-depth results across media strategies:
-python examples/compare_media_crossing.py
+# Fig. 7 (B_xx, B_xz) reproduced via the exact Backus / nodal core:
+python examples/fig7_backus_check.py
 ```
 
 
@@ -171,11 +186,11 @@ python examples/compare_media_crossing.py
 |---|---|
 | `homogeneous_isotropic(grid, sigma)` | Constant scalar σ |
 | `layered_isotropic(grid, z_interfaces, sigmas)` | 1-D layered σ(z) |
-| `from_sigma_func(grid, sigma_func, ...)` | σ from callable; SVD normals |
-| `from_geometry_func(grid, sigma_func, interface_func, ...)` | σ + analytical normals via `GeometryStack` |
+| `from_geometry_exact(grid, sigma_func, geometry, method=...)` | **Exact path** — σ + analytic normals/fractions via `GeometryStack`; `method` ∈ {`pointwise`, `backus`, `nodal`} |
+| `from_sigma_func(grid, sigma_func, method=..., ...)` | **Lookup path** — σ from a black-box callable; SVD-estimated normals + sampled fractions; same `method` choices |
 | `from_fine_grid(grid, fine_grid, fine_media)` | Coarsen from reference |
 
-All `sigma_func`-based builders accept both scalar (isotropic) and 3×3 tensor (anisotropic) conductivity values, enabling full tilted transverse isotropy (TTI) and general anisotropy.
+Both media-building paths accept both scalar (isotropic) and 3×3 tensor (anisotropic) conductivity values, enabling full tilted transverse isotropy (TTI) and general anisotropy, and both expose the same three sub-cell schemes (`pointwise`, `backus`, `nodal`).
 
 ### Geometry
 
@@ -221,7 +236,7 @@ MIT License. See `pyproject.toml` for details.
 ---
 ## Development
 
-This implementation was developed with the assistance of Claude (Anthropic), including the design and debugging of the sub-cell homogenization routines (from_geometry_func, sequential nodal homogenization) and the GeometryStack interface.
+This implementation was developed with the assistance of Claude (Anthropic), including the design and debugging of the sub-cell homogenization routines (the exact-geometry `from_geometry_exact` builder, the anisotropic Backus / eq. 9 laminate, and the sequential nodal homogenization) and the `GeometryStack` interface.
 
 
 ## References

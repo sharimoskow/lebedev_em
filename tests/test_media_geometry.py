@@ -3,7 +3,7 @@ Regression tests for the media.py / geometry.py review fixes:
 
 1. Cylinder/sphere ``straddles`` uses the clamped closest-point distance
    (min-over-corners misses interior minima of the convex radius function).
-2. ``from_geometry_func`` with a scalar callable cannot leave uninitialized
+2. ``from_geometry_exact`` with a scalar callable cannot leave uninitialized
    (zero) tensor entries, and matches ``from_sigma_func`` / the analytic
    ``planar_interface_isotropic`` on a two-layer planar model.
 3. Per-axis line fractions are taken along the lines through the NODE
@@ -141,7 +141,7 @@ class TestStraddles:
 
 
 # ---------------------------------------------------------------------------
-# 2. from_geometry_func scalar path: no uninitialized tensors, consistency
+# 2. from_geometry_exact scalar path: no uninitialized tensors, consistency
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
@@ -182,7 +182,7 @@ class TestGeometryFuncScalarPath:
         rel = np.abs(Tg - Ta).max(axis=(1, 2)) / scale
         # Voxel-sampled fractions vs exact fractions: a few percent of sigma2.
         # (planar_interface_isotropic applies a fake-straddle guard that
-        # from_geometry_func does not; allow for those cells via percentile.)
+        # from_geometry_exact does not; allow for those cells via percentile.)
         assert np.median(rel) < 0.02
         assert np.percentile(rel, 90) < 0.10
 

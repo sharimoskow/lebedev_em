@@ -6,9 +6,10 @@ overlaid on the values digitized from the published figure.
 NOTE: the DDH03 curve is extracted from the printed figure, so it is an
 approximate target, not exact ground truth.
 
-Uses from_geometry_func (exact normals; skips uniform cells) with method=
-'backus' / 'pointwise', the fully coupled single solve, and lgmres (the
-optimal grid is ~10^5 complex unknowns — too large for a direct solve).
+Uses from_geometry_exact (exact normals + exact volume/line fractions) with
+method= 'pointwise' / 'backus' / 'nodal', the fully coupled single solve, and
+lgmres (the optimal grid is ~10^5 complex unknowns — too large for a direct
+solve).
 
 Usage:
   python fig9_backus_vs_paper.py probe      # time one coupled solve

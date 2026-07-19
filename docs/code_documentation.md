@@ -138,7 +138,7 @@ of Moskow et al. (1999).
 
 Two computational paths are supported:
 
-- **Exact geometry path** (`from_geometry_func`): the interface is described
+- **Exact geometry path** (`from_geometry_exact`): the interface is described
   by geometric objects (cylinder, plane), so `n̂` is analytic at each node,
   and fractions are computed by exact integration. Straddle detection uses
   the clamped closest-point distance from the interface to the dual box.
