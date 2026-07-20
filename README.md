@@ -21,10 +21,11 @@ case handled by the oblique-interface nodal homogenization.
 **Research context.** This code is developed for academic research purposes in
 the Department of Mathematics at Drexel University. The project supports our
 proposal to the U.S. Department of Energy's **Genesis** program on the modeling
-of fractures — thin, high-contrast conductivity structures at arbitrary
-orientations, the regime addressed by the nodal homogenization and validated in
-the thin-layer benchmark — as well as related proposals, including to the Air
-Force Office of Scientific Research (**AFOSR**) on subsurface imaging.
+of fractures — where cracks appear as thin, high-contrast conductivity
+structures at arbitrary orientations, precisely the regime addressed by the
+nodal homogenization and the thin-layer benchmark below — as well as related
+proposals, including to the Air Force Office of Scientific Research (**AFOSR**)
+on subsurface imaging.
 
 ---
 
@@ -76,22 +77,27 @@ Optional dev extras: `pytest`, `ipython`, `jupyter`.
 ```python
 import numpy as np
 from lebedev_em import symmetric_uniform_grid, homogeneous_isotropic, LebedevMaxwellSolver
+from lebedev_em.postprocess import lebedev_E_at_point
 
-# 1. Build a symmetric uniform grid (±10 m, 8 cells per half-axis)
-grid = symmetric_uniform_grid(Mx=8, My=8, Mz=8, Lx=10, Ly=10, Lz=10)
+# 1. Build a symmetric uniform grid (±10 m, 16 cells per axis)
+grid = symmetric_uniform_grid(Mx=16, My=16, Mz=16, Lx=10, Ly=10, Lz=10)
 
 # 2. Homogeneous isotropic medium, σ = 1 S/m
 media = homogeneous_isotropic(grid, sigma=1.0)
 
-# 3. Solve for x-directed magnetic dipole at origin, f = 2500 Hz
-omega = 2 * np.pi * 2500
-solver = LebedevMaxwellSolver(grid, media, omega=omega)
-result = solver.solve(0, 0, 0, dipole_comp=0)
+# 3. Solve for an x-directed unit electric dipole at the origin, f = 2500 Hz
+solver = LebedevMaxwellSolver(grid, media, omega=2 * np.pi * 2500)
+result = solver.solve(0.0, 0.0, 0.0, dipole_comp=0)     # 1 A·m, coupled solve
 
-# 4. Extract Bxx on the z-axis
-from lebedev_em.postprocess import extract_axis_response
-z_ax, Bxx = extract_axis_response(grid, result, comp='xx')
+# 4. E_x at a receiver point via the four-cluster interpolate-then-average read
+Ex = lebedev_E_at_point(grid, result["E_c"], 0, 0.0, 0.0, 1.25)
 ```
+
+For magnetic-dipole (induction-logging) sources and B-field extraction on the
+axis, see `examples/benchmark_wholespace.py` and `examples/fig9_refinement.py`,
+which build the per-cluster magnetic-dipole right-hand side with
+`build_rhs_per_cluster(..., hx_comp=...)` and read the field with
+`lebedev_B_on_z_axis`.
 
 ---
 
@@ -99,16 +105,15 @@ z_ax, Bxx = extract_axis_response(grid, result, comp='xx')
 
 When σ has off-diagonal entries (tilted anisotropy, homogenized interface
 cells), the four Lebedev clusters couple, and the solve must be coupled:
-use `LebedevMaxwellSolver.solve_coupled` (or an all-cluster RHS with the
-component-aware boundary conditions). The historical four-separate-solves
-procedure — one solve per cluster source, each read on its own sub-grid —
-is exact for isotropic media but **under-counts anisotropy-generated
-cross-components** (e.g. B_xz from an x-directed dipole), because the
-coupling deposits part of the response on partner clusters' sub-grids; in a
-homogeneous tilted anisotropic medium the cross-component is lost entirely.
-`tests/test_anisotropic_coupling.py` locks in both behaviors. The correct
-generalization of the four-solve mixed-BC averaging to coupled clusters
-(retaining its boundary-error cancellation) is work in progress.
+use `LebedevMaxwellSolver.solve` with the default `method='coupled'` (an
+all-cluster RHS with the component-aware per-cluster boundary conditions).
+The historical four-separate-solves procedure — one solve per cluster
+source, each read on its own sub-grid — is exact for isotropic media but
+**under-counts anisotropy-generated cross-components** (e.g. B_xz from an
+x-directed dipole), because the coupling deposits part of the response on
+partner clusters' sub-grids; in a homogeneous tilted anisotropic medium the
+cross-component is lost entirely. `tests/test_anisotropic_coupling.py`
+locks in both behaviors.
 
 ## Benchmarks
 
@@ -141,6 +146,24 @@ fitted constants):
   python examples/two_layer_averaging_convergence.py 5    # transverse (k) convergence
   ```
 
+- **Thin dipping anisotropic layer crossed by a borehole (DDH03 Fig. 9).**
+  The full Fig.-9 configuration: resistive borehole (σ = 0.05 S/m,
+  R = 0.1 m), invaded zone (σ = 0.1 S/m, R = 0.6 m, replacing the formation
+  near the wellbore), and a thin 75°-dipping anisotropic layer (0.25 m,
+  σ_T = 0.1, σ_N = σ_T/200 S/m) present for r ≥ 0.6 m; z magnetic dipole at
+  52.65 kHz, Im B_z on the axis. With the coupled solve and either averaged
+  scheme (`backus` or `nodal`), the computed curves match the values
+  digitized from the published figure to 0.4–4.5% (no layer) and 3–12%
+  (resistive layer) — **identically at three grid-refinement levels**,
+  reproducing DDH03's own k = 6 vs k = 12 insensitivity for sub-cell layers.
+
+  ```bash
+  python examples/fig9_refinement.py solve backus 1 nolayer   # one (method, level, model) per call
+  python examples/fig9_refinement.py solve backus 1 annulus
+  python examples/fig9_refinement.py report                   # tables vs the digitized figure
+  python examples/fig9_refinement.py plot
+  ```
+
 ## Deviated-borehole model example (media-building strategies)
 
 The `examples/` directory also exercises a deviated-borehole model
@@ -171,9 +194,11 @@ python examples/fig7_backus_check.py
 
 | Function / Class | Description |
 |---|---|
-| `uniform_grid(Mx, My, Mz, hx, hy, hz)` | Uniform spacing |
+| `uniform_grid(Mx, My, Mz, Lx, Ly, Lz)` | Uniform spacing |
 | `symmetric_uniform_grid(Mx, My, Mz, Lx, Ly, Lz)` | Symmetric uniform |
-| `optimal_geometric_1d(L, hmin, ratio)` | Optimal grid geometric stretching |
+| `optimal_geometric_1d(k, h_min, L, gamma)` | Optimal geometric half-axis (2k+1 interleaved primary+dual nodes) |
+| `symmetric_optimal_grid(h_min, L, z, gamma, k)` | 3-D grid with optimal x/y and user z (DDH03 logging geometry) |
+| `hybrid_axial_grid(z_min, z_max, n_inner, k_outer)` | Equidistant inner zone + geometric outer zones |
 | `LebedevGrid3D` | Core grid class |
 
 ### Media builders
@@ -181,7 +206,7 @@ python examples/fig7_backus_check.py
 | Function | Description |
 |---|---|
 | `homogeneous_isotropic(grid, sigma)` | Constant scalar σ |
-| `layered_isotropic(grid, z_interfaces, sigmas)` | 1-D layered σ(z) |
+| `layered_isotropic(grid, layer_boundaries, sigma_values)` | 1-D layered σ(z) |
 | `from_geometry_exact(grid, sigma_func, geometry, method=...)` | **Exact path** — σ + analytic normals/fractions via `GeometryStack`; `method` ∈ {`pointwise`, `backus`, `nodal`} |
 | `from_sigma_func(grid, sigma_func, method=..., ...)` | **Lookup path** — σ from a black-box callable; SVD-estimated normals + sampled fractions; same `method` choices |
 | `from_fine_grid(grid, fine_grid, fine_media)` | Coarsen from reference |
@@ -192,24 +217,25 @@ Both media-building paths accept both scalar (isotropic) and 3×3 tensor (anisot
 
 | Class | Description |
 |---|---|
-| `CylindricalBoundary(radius)` | Cylindrical interface (r = const) |
-| `PlanarBoundary(normal, d)` | Planar interface (n·x = d) |
-| `SphericalBoundary(center, radius)` | Spherical interface |
+| `CylindricalBoundary(radius)` | Cylindrical interface (r = const, axis = z) |
+| `PlanarBoundary(n_hat, d)` | Planar interface (n̂·x = d) |
+| `SphericalBoundary(radius)` | Spherical interface (centered at origin) |
 | `GeometryStack(boundaries)` | Ordered collection of boundaries (innermost first) |
 
 ### Solver
 
 ```python
 solver = LebedevMaxwellSolver(grid, media, omega)
-result = solver.solve(sx, sy, sz, dipole_comp=0,   # 0=x, 1=y, 2=z
-                      method='direct')              # or 'lgmres'
+result = solver.solve(sx, sy, sz, dipole_comp=0,    # 0=x, 1=y, 2=z (electric dipole)
+                      method='coupled')              # or 'clustered' (isotropic only)
+# result: dict with 'E_avg', 'E_c' (per-cluster), 'rhs'
 ```
 
 ### Analytics
 
 ```python
-from lebedev_em import magnetic_dipole_B, Bxx_homogeneous
-B_analytic = magnetic_dipole_B(r_obs, sigma, omega)
+from lebedev_em.analytics import magnetic_dipole_B, electric_dipole_E
+B_analytic = magnetic_dipole_B(x, y, z, sigma, omega)   # whole-space reference
 ```
 
 ---
@@ -232,7 +258,7 @@ MIT License. See `pyproject.toml` for details.
 ---
 ## Development
 
-This implementation was developed with the assistance of Claude (Anthropic), including the design and debugging of the sub-cell homogenization routines (the exact-geometry `from_geometry_exact` builder, the anisotropic Backus / eq. 9 laminate, and the sequential nodal homogenization) and the `GeometryStack` interface.
+This implementation was developed with the assistance of Claude (Anthropic), including the design and debugging of the sub-cell homogenization routines (the exact-geometry `from_geometry_exact` builder, the anisotropic Backus / eq. 9 laminate, and the nodal homogenization) and the `GeometryStack` interface.
 
 
 ## References
