@@ -38,7 +38,6 @@ from lebedev_em.postprocess import (compute_B_from_E, build_rhs_per_cluster,
 
 OMEGA = 2 * np.pi * 52650.0
 SIG1 = 0.10                       # background
-SIG2 = 0.10 / 200.0              # resistive slab (isotropic)
 THETA = np.radians(75.0)
 NH = np.array([np.sin(THETA), 0.0, np.cos(THETA)])
 Z_CEN = 1.0                       # slab centre on the z-axis
@@ -50,7 +49,18 @@ CLUSTERS = [C000, C101, C110, C011]
 L_DOM = 3.0
 RECV = np.linspace(0.5, 2.0, 13)
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
-NPZ = os.path.join(OUT, "tilted_slab_conv.npz")
+
+# Layer material: LAYER=iso (default) is an isotropic resistive slab;
+# LAYER=aniso is the Fig-9 material -- uniaxial about the slab normal with
+# sigma_T = background (0.1) and sigma_N = sigma_T/200.  In the aniso case the
+# slab is INVISIBLE to transverse currents; all attenuation comes from sigma_N.
+LAYER = os.environ.get("LAYER", "iso")
+if LAYER == "aniso":
+    SIG_LAYER = SIG1 * np.eye(3) + (SIG1 / 200.0 - SIG1) * np.outer(NH, NH)
+    NPZ = os.path.join(OUT, "tilted_slab_conv_aniso.npz")
+else:
+    SIG_LAYER = (SIG1 / 200.0) * np.eye(3)
+    NPZ = os.path.join(OUT, "tilted_slab_conv.npz")
 
 
 def sigma_func(X, Y, Z):
@@ -59,7 +69,7 @@ def sigma_func(X, Y, Z):
     out = np.zeros(shape + (3, 3), dtype=complex)
     s = NH[0] * X + NH[1] * Y + NH[2] * Z
     out[...] = SIG1 * np.eye(3)
-    out[(s >= D1) & (s < D2)] = SIG2 * np.eye(3)
+    out[(s >= D1) & (s < D2)] = SIG_LAYER
     return out
 
 
@@ -117,7 +127,11 @@ def plot():
              for m in methods}
     print("available:", {m: avail[m] for m in methods})
     Mtruth = min(avail[m][-1] for m in methods if avail[m])
-    truth = np.mean([store[f"{m}_M{Mtruth}"] for m in methods], axis=0)
+    # Reference = mean of backus & nodal at the finest grid.  They agree with
+    # each other to ~1% in both materials and converge smoothly; including a
+    # not-yet-converged pointwise (slow from above in the aniso case) would
+    # contaminate the reference.
+    truth = 0.5 * (store[f"backus_M{Mtruth}"] + store[f"nodal_M{Mtruth}"])
     peak = np.abs(truth).max()
     Z_ERR_MIN = 0.9
     msk = (np.abs(truth) > 0.05 * peak) & (recv >= Z_ERR_MIN)
@@ -126,7 +140,8 @@ def plot():
     # Panel A: profiles at the COARSEST grid (slab ~1 cell) vs the truth --
     # this is where the methods separate.
     Mc = min(min(avail[m]) for m in methods if avail[m])
-    ax[0].plot(recv, truth, "k-", lw=2, label=f"truth (M={Mtruth})")
+    ax[0].plot(recv, truth, "k-", lw=2,
+               label=f"reference: mean(backus,nodal) M={Mtruth}")
     for m in methods:
         if Mc in avail[m]:
             ax[0].plot(recv, store[f"{m}_M{Mc}"], "o--", color=col[m], ms=4,
@@ -144,18 +159,20 @@ def plot():
         hs = [float(store[f"{m}_M{M}_h"][0]) for M in Ms]
         vs = [store[f"{m}_M{M}"][it] for M in Ms]
         ax[1].plot(hs, vs, "o-", color=col[m], label=m)
-    ax[1].axhline(truth[it], color="k", lw=1.5, ls="-", label="truth")
+    ax[1].axhline(truth[it], color="k", lw=1.5, ls="-",
+                  label=f"reference (bk/nd M={Mtruth})")
     ax[1].axvline(T_SLAB, color="gray", ls="--", lw=1, label=f"t=h (t={T_SLAB})")
     ax[1].set_xlabel("grid spacing h (m)")
     ax[1].set_ylabel(rf"Im $B_z$ at z={recv[it]:.2f} m (nT)  [transmitted]")
     ax[1].set_title("Pointwise misses the sub-cell slab; backus/nodal capture it")
     ax[1].grid(alpha=0.3); ax[1].legend(fontsize=8); ax[1].invert_xaxis()
 
-    fig.suptitle(f"Tilted 75° resistive slab, t={T_SLAB} m (σ1={SIG1}, "
-                 f"σ2=σ1/200), coupled solve — refinement as ground truth",
-                 fontsize=11)
+    mat = ("anisotropic Fig-9 layer (σ_T=σ_bg, σ_N=σ_T/200)"
+           if LAYER == "aniso" else "isotropic resistive layer (σ2=σ1/200)")
+    fig.suptitle(f"Tilted 75° slab, t={T_SLAB} m — {mat}, "
+                 f"coupled solve — refinement as ground truth", fontsize=11)
     fig.tight_layout()
-    png = os.path.join(OUT, "tilted_slab_conv.png")
+    png = NPZ.replace(".npz", ".png")
     fig.savefig(png, dpi=130)
     print("figure ->", png)
 
