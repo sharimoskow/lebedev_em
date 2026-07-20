@@ -11,7 +11,9 @@ The paper solves frequency-domain Maxwell equations in 3D **anisotropic** media 
 2. **Conductivity averaging (homogenization)** — handles heterogeneous media inside grid cells
 3. **Optimal geometric grids** — spectrally optimal non-uniform grids for fast convergence
 
-Current implementation priority: **(1) Lebedev grid + 4-cluster averaging**.
+All three pieces are implemented and validated (77 passing tests). The
+**coupled single solve is the method and the default** — see "Settled
+conventions" below before touching solver or media code.
 
 ---
 
@@ -182,21 +184,31 @@ The grid runs from x₀ to xMx where xk+1 = nh (n = number of equidistant steps 
 lebedev_em/
 ├── CLAUDE.md                    ← you are here
 ├── pyproject.toml
+├── README.md                    ← API overview, quickstart, benchmark summary
+├── docs/
+│   ├── code_documentation.md    ← detailed module docs + benchmark write-ups
+│   └── nodal_homogenization_3d.{md,tex,pdf}
 ├── src/lebedev_em/
-│   ├── __init__.py
-│   ├── grid.py                  ← LebedevGrid3D class (coordinates, P/R indexing, clusters)
+│   ├── grid.py                  ← LebedevGrid3D; uniform / optimal-geometric / hybrid grids
 │   ├── operators.py             ← sparse FD curl operators C_RE, C_PR
-│   ├── media.py                 ← EM medium: σ, μ, ε on the grid (scalar/tensor)
-│   ├── sources.py               ← source term with 4-cluster weighting
-│   ├── solver.py                ← system assembly and solve (SLDM or direct)
-│   └── analytics.py            ← analytical solutions for validation
-├── tests/
-│   ├── test_grid.py
-│   ├── test_operators.py
-│   └── test_wholespace.py
-└── examples/
-    └── wholespace_dipole.py     ← reproduces Fig. 2 from DDH03
+│   ├── media.py                 ← media builders: homogeneous/layered, from_geometry_exact,
+│   │                              from_sigma_func, from_fine_grid; pointwise/backus/nodal schemes
+│   ├── geometry.py              ← GeometryStack, CylindricalBoundary, PlanarBoundary (exact
+│   │                              normals and volume fractions)
+│   ├── sources.py               ← 4-cluster source weighting (eq. 7); build_rhs_per_cluster
+│   ├── solver.py                ← LebedevMaxwellSolver; solve_coupled (default) / clustered
+│   ├── postprocess.py           ← lebedev_E_at_point, lebedev_B_on_z_axis (interpolate-then-
+│   │                              average four-cluster reads)
+│   └── analytics.py             ← whole-space / two-half-space (Sommerfeld) references
+├── tests/                       ← 8 files, 77 tests: grid, operators, bc+solver, media/geometry,
+│                                  exact geometry, backus, anisotropic coupling, postprocess
+└── examples/                    ← ~40 runners: benchmark_*.py (Figs 2/3, whole-space, two-layer),
+                                   fig9_*.py (DDH03 Fig 9 study), fig7_backus_check.py,
+                                   tilted_*.py diagnostics, plot_*.py
 ```
+
+The benchmark notes (`lebedev_em_benchmark_notes.tex`/`.pdf`) are deliberately
+kept **outside the repo** and distributed separately; do not re-add them.
 
 ---
 
@@ -234,15 +246,21 @@ For **isotropic** media, INVMU_P and SIGMADOT_R are scalar multiples of identity
 
 **Electric BC** on a face (e.g., x=x_0): set tangential E components to zero at all R-nodes on that face. This is done by zeroing the corresponding rows/columns in the system matrix (or removing those unknowns).
 
-**Magnetic BC** on a face: equivalent to adding a fictitious "mirror" row/column. In practice, for the standard 1D analysis this is the Neumann condition. In 3D it translates to: the normal derivative of the tangential E is zero, which in the FD stencil means the ghost node outside the domain has the same value as the last interior node.
+**Magnetic BC** on a face: enforce **H × n = 0** (DDH03 eq. 6) by replacing the corresponding rows with the discrete curl expression for the tangential H components at the boundary. (An earlier ghost-node "Neumann on E" implementation was wrong and has been fixed — see tests in `test_bc_and_solver.py`.)
 
-### Validation Targets
+### Validated Benchmarks (all reproduced; runners in examples/)
 
-1. **Fig. 2** (DDH03): Im(Bxx) of a x-oriented magnetic dipole in homogeneous whole-space (σ=1 S/m, f=2.5 kHz). Compare analytic vs. single Yee cluster vs. Lebedev average → verify error cancellation near transmitter.
-
-2. **Fig. 3** (DDH03): Same quantity, showing error cancellation near outer boundary.
-
-3. **Fig. 5** (DDH03): 2C-40 sonde response over crossbedded isotropic/anisotropic layers. Benchmark against quasi-analytic solution.
+1. **Figs. 2/3** (DDH03): whole-space magnetic dipole, error cancellation near
+   transmitter and outer boundary (`benchmark_figs2_3.py`).
+2. **Two-half-space VED vs Sommerfeld**: ~1% RMS in the conductive half-space.
+3. **Fig. 9** (DDH03): resistive borehole + invaded zone + thin dipping
+   anisotropic layer. The invaded **annulus replaces the layer** for r < 0.6 m
+   (this resolved the long-standing discrepancy); averaged schemes then match
+   the published curve at every resolution (`fig9_refinement.py`).
+4. **Fig. 7** (DDH03): coupled solve reproduces the published x-dipole curves
+   at exactly ×2.00±0.03 in both B_xx and B_xz — consistent with their y≥0
+   half-domain doubling the on-plane source (pending author confirmation).
+   Do not "fix" code to chase this factor of 2.
 
 ---
 
@@ -261,17 +279,44 @@ The full tensor Green's function is in `analytics.py`.
 
 ## Development Status
 
-| Component | Status | Notes |
-|---|---|---|
-| LebedevGrid3D | 🟡 In progress | Core class |
-| Curl operators C_RE, C_PR | 🟡 In progress | Sparse matrices |
-| Medium parameters | ⬜ Pending | Isotropic first |
-| Source placement | ⬜ Pending | 4-cluster weights |
-| System assembly + solve | ⬜ Pending | scipy.sparse |
-| Isotropic benchmark | ⬜ Pending | Fig. 2 validation |
-| Anisotropic coupling | ⬜ Future | Off-diagonal σ |
-| Optimal grids | ⬜ Future | Geometric progression |
-| Conductivity averaging | ⬜ Future | Moskow et al. 1999 |
+All core components are **done and tested** (run `python -m pytest`; 77 tests
+should pass): grid + optimal geometric grids, curl operators, media builders
+(scalar and full-tensor), 4-cluster sources, coupled and clustered solves,
+four-cluster postprocessing reads, analytic references, and the benchmarks
+listed above.
+
+## Settled Conventions (do not re-litigate these)
+
+1. **σ̇ = σ − iωε** under the exp(−iωt) convention. DDH03's printed "σ + iωε"
+   after eq. 5 is a typo; deriving eq. 5 from eq. 4 forces the minus sign.
+2. **The coupled single solve is THE method** and the default
+   (`method='coupled'`). DDH03 themselves solve one coupled system with eq.-7
+   sources in all four clusters; "average over clusters" means the four
+   sub-grids of that single solution. Verified three independent ways
+   (rotated-frame equivalence, Born-order argument, exact constant-field
+   assembly probe at rel. err ~3e-10).
+3. **Per-cluster-source ("clustered") solves are isotropic-only.** In coupled
+   media they under-count cross-components (the response lives on partner
+   sub-grids); a guard warns if misused. Locked in by
+   `tests/test_anisotropic_coupling.py`.
+4. **`from_geometry_func` was deleted.** The exact-geometry path is
+   `from_geometry_exact(grid, sigma_func, geometry, method=...)`; the lookup
+   path is `from_sigma_func`. Both take `method` ∈ {pointwise, backus, nodal}.
+5. **Magnetic BC** rows enforce H×n = 0 (DDH03 eq. 6) — not naive ghost-node
+   Neumann on E.
+
+## Open Problem (the current research front)
+
+Coupled-consistent **nodal homogenization**: in the Fig-9 layer case the full
+nodal scheme (off-diagonals active, coupled solve) over-attenuates (geo-mean
+1.46 vs paper ~0.97) while nodal-with-off-diagonals-zeroed matches. The
+over-attenuation is carried by the *structure* of the nodal interface-cell
+off-diagonals, not eigenvalue overshoot and not truncation. The
+energy-matching derivation (Σ_D = L̃⁻ᵀGL̃⁻¹) needs re-posing against the
+coupled Lebedev discrete structure. Numerical targets: reproduce pointwise
+(0.97) at coarse resolution; reduce to current nodal in the uncoupled /
+axis-aligned limits. See `docs/nodal_homogenization_3d.md` and the external
+benchmark notes.
 
 ---
 
