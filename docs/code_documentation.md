@@ -281,7 +281,8 @@ grid-calibration-free attenuation measure (geo-mean layer/no-layer): paper
 0.697, backus 0.729–0.733, nodal 0.729–0.742 at every level. Pointwise
 sampling is 20%+ off at every practical resolution and converges only
 slowly. Runner: `examples/fig9_refinement.py` (solve/report/plot); the
-full study is written up in `docs/lebedev_em_benchmark_notes.tex`/`.pdf`.
+full study is written up in the companion document *Benchmark notes for
+`lebedev_em`* (kept outside the repo; distributed separately).
 
 ---
 
