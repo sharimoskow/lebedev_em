@@ -82,21 +82,42 @@ LEVELS = {1: (0.05, 6, 96),
           4: (0.02, 9, 240)}
 
 
-def make_model(with_layer):
+R_INV = 0.6      # invasion radius (DDH03 Fig. 8: sigma=0.1 S/m, R=0.6 m)
+
+
+def make_model(model):
+    """model in {'nolayer', 'layer', 'annulus'}.
+
+    'layer'   -- the layer extends inward to the borehole wall (our original
+                 replication, which ignored the invasion since sigma_inv equals
+                 the background).
+    'annulus' -- the invasion zone REPLACES the layer for r < R_INV (the
+                 standard logging-model reading of DDH03 Fig. 8, where the
+                 invasion punches through the formation as in their Fig. 6/7):
+                 the anisotropic layer exists only for r >= R_INV.
+    """
+    with_layer = model in ("layer", "annulus")
+    annulus = model == "annulus"
+
     def sigma_func(X, Y, Z):
         X = np.asarray(X, float); Y = np.asarray(Y, float); Z = np.asarray(Z, float)
         shape = np.broadcast(X, Y, Z).shape
         out = np.zeros(shape + (3, 3), dtype=complex)
         out[...] = SIG_BG * np.eye(3)
+        r = np.sqrt(X ** 2 + Y ** 2)
         if with_layer:
             side = N_HAT[0] * X + N_HAT[2] * Z
-            out[(side < D_TOP) & (side > D_BOT)] = SIG_ANISO
-        r = np.sqrt(X ** 2 + Y ** 2)
+            in_layer = (side < D_TOP) & (side > D_BOT)
+            if annulus:
+                in_layer = in_layer & (r >= R_INV)
+            out[in_layer] = SIG_ANISO
         out[r < R_BORE] = SIG_BORE * np.eye(3)
         return out
     bounds = [CylindricalBoundary(radius=R_BORE)]
     if with_layer:
         bounds += [PlanarBoundary(n_hat=N_HAT, d=D_TOP), PlanarBoundary(n_hat=N_HAT, d=D_BOT)]
+    if annulus:
+        bounds += [CylindricalBoundary(radius=R_INV)]
     return sigma_func, GeometryStack(bounds)
 
 
@@ -106,14 +127,14 @@ def build_grid(level):
     return symmetric_optimal_grid(h_min, 300., z_fd, GAMMA, k=k)
 
 
-def solve(level, with_layer, method):
+def solve(level, model, method):
     h_min, k, n_inner = LEVELS[level]
     grid = build_grid(level)
-    tag = f"{method}_L{level}_{'layer' if with_layer else 'nolayer'}"
+    tag = f"{method}_L{level}_{model}"
     print(f"[{tag}] h_min={h_min:.4f} k={k} n_inner={n_inner} "
           f"Mx={len(grid.x)-1} Mz={len(grid.z)-1} 3N_R={3*grid.N_R}", flush=True)
     t0 = time.time()
-    sf, geo = make_model(with_layer)
+    sf, geo = make_model(model)
     # h_svd scaled so sub-cell resolution relative to h_min matches the base
     # run (0.03 for pointwise/backus, 0.025 for nodal at h_min=0.05).
     scale = h_min / 0.05
@@ -169,7 +190,7 @@ def report():
         r = r[r > 0]
         return np.exp(np.mean(np.log(r)))
 
-    for model, paper in (("layer", paper_l), ("nolayer", paper_n)):
+    for model, paper in (("layer", paper_l), ("annulus", paper_l), ("nolayer", paper_n)):
         print(f"\n=== {model}: geo-mean ratio vs digitized paper ===")
         print("level  h_min   " + "".join(f"{m:>11s}" for m in ("pointwise", "backus", "nodal")))
         for lv in sorted(LEVELS):
@@ -235,15 +256,17 @@ def plot():
     # Right: geo-mean ratio vs paper as a function of h_min
     a = ax[1]
     paper_l = np.array([PAPER['layer'][zz] for zz in Z_EVAL])
-    for m in ("pointwise", "backus", "nodal"):
-        hs, rs = [], []
-        for lv in sorted(LEVELS):
-            k = f"{m}_L{lv}_layer_vals"
-            if k in data:
-                r = data[k] / paper_l
-                hs.append(LEVELS[lv][0]); rs.append(np.exp(np.mean(np.log(r[r > 0]))))
-        if hs:
-            a.plot(hs, rs, "o-", color=colors[m], label=f"{m} (layer)")
+    for model, marker, ls in (("layer", "o", "-"), ("annulus", "^", "--")):
+        for m in ("pointwise", "backus", "nodal"):
+            hs, rs = [], []
+            for lv in sorted(LEVELS):
+                k = f"{m}_L{lv}_{model}_vals"
+                if k in data:
+                    r = data[k] / paper_l
+                    hs.append(LEVELS[lv][0]); rs.append(np.exp(np.mean(np.log(r[r > 0]))))
+            if hs:
+                a.plot(hs, rs, marker=marker, ls=ls, color=colors[m],
+                       label=f"{m} ({model})")
     a.axhline(1.0, color="k", lw=0.8, ls="--", label="digitized paper")
     a.set_xlabel(r"transverse $h_{\min}$ (m)"); a.set_ylabel("geo-mean ratio vs paper")
     a.set_title("Refinement drift of each scheme", fontsize=10)
@@ -266,11 +289,11 @@ if __name__ == "__main__":
         print(__doc__); sys.exit(1)
     method = sys.argv[2]; level = int(sys.argv[3]); model = sys.argv[4]
     assert method in ("pointwise", "backus", "nodal") and level in LEVELS \
-        and model in ("layer", "nolayer")
+        and model in ("layer", "nolayer", "annulus")
     key = f"{method}_L{level}_{model}"
     if os.path.exists(NPZ):
         with np.load(NPZ) as d:
             if f"{key}_vals" in d.files:
                 print(f"{key} already done; skipping"); sys.exit(0)
-    z, Bz, vals, info = solve(level, model == "layer", method)
+    z, Bz, vals, info = solve(level, model, method)
     save(key, z, Bz, vals, info)
