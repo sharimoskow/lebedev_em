@@ -253,24 +253,35 @@ error-cancellation mechanism at work in an inhomogeneous medium. Runner:
 ### 9. Thin dipping anisotropic layer crossed by a borehole (DDH03 Fig. 9)
 
 The configuration of DDH03 Figure 9: background σ = 0.1 S/m; resistive
-borehole (σ = 0.05 S/m, R = 0.1 m); a thin dipping anisotropic layer of
-0.25 m normal thickness, dip 75°, σ_T = 0.1 S/m, σ_N = σ_T/200, crossing the
-axis over z ∈ [−1.93, −0.95] m; z-directed magnetic dipole at the origin,
-f = 52.65 kHz; observable Im B_z on the axis, with and without the layer.
+borehole (σ = 0.05 S/m, R = 0.1 m); an invaded zone (σ = 0.1 S/m,
+R = 0.6 m) that **replaces the formation — including the layer — near the
+wellbore**; and a thin dipping anisotropic layer of 0.25 m normal thickness,
+dip 75°, σ_T = 0.1 S/m, σ_N = σ_T/200, present only for r ≥ 0.6 m, crossing
+the axis over z ∈ [−1.93, −0.95] m; z-directed magnetic dipole at the
+origin, f = 52.65 kHz; observable Im B_z on the axis, with and without the
+layer. (The invaded zone carries the background conductivity and an earlier
+model transcription therefore omitted it — extending the layer to the
+borehole wall roughly doubles the layer's attenuation and cannot be
+reconciled with the published curve by any scheme or resolution.)
 
-Method: full DDH03 methodology — k = 6 optimal transverse grid with
-h_min = 0.05 m (resolving the borehole), four-cluster eq.-(7) sources,
-per-cluster mixed boundary conditions, sequential nodal homogenization with
-analytic normals, interpolated four-cluster extraction at the exact receiver
-positions.
+Method: full DDH03 methodology — optimal transverse grids, hybrid axial
+grid, four-cluster eq.-(7) sources, per-cluster mixed boundary conditions,
+exact-geometry sub-cell homogenization (`from_geometry_exact`, eq.-(9)
+backus or nodal), a single fully **coupled** solve, interpolated
+four-cluster extraction at the exact receiver positions. Three refinement
+levels: h_min = 0.05/k=6 (the published-comparison grid), 1/30 / k=7,
+0.025 / k=8.
 
-Results: the published "no layer" curve agrees with the unit-moment
-homogeneous analytic solution to 1–8% (confirming the figure's absolute
-normalization; the near-source deficit is the borehole's local reduction),
-and our computed curves match the published values within 0.7–5.5% (no
-layer) and 0–15% (resistive layer, the residual localized to the layer
-window and insensitive to ±5 cm shifts of the layer position). Runner:
-`examples/fig9_check.py`; sensitivity tests: `examples/fig9_tests.py`.
+Results: the no-layer curves match the digitized published values to
+0.4–4.5% (geo-mean ratio 1.035 → 1.014 under refinement, all three schemes
+within 1%); the resistive-layer curves (backus and nodal, coupled) match to
+3–12% (geo-mean 1.085 → 1.070) **identically at every refinement level** —
+reproducing DDH03's own k=6 vs k=12 insensitivity. In the
+grid-calibration-free attenuation measure (geo-mean layer/no-layer): paper
+0.697, backus 0.729–0.733, nodal 0.729–0.742 at every level. Pointwise
+sampling is 20%+ off at every practical resolution and converges only
+slowly. Runner: `examples/fig9_refinement.py` (solve/report/plot); the
+full study is written up in `docs/lebedev_em_benchmark_notes.tex`/`.pdf`.
 
 ---
 
