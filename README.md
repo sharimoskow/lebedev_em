@@ -23,9 +23,7 @@ the Department of Mathematics at Drexel University. The project supports our
 proposal to the U.S. Department of Energy's **Genesis** program on the modeling
 of fractures — where cracks appear as thin, high-contrast conductivity
 structures at arbitrary orientations, precisely the regime addressed by the
-nodal homogenization and the thin-layer benchmark below — as well as related
-proposals, including to the Air Force Office of Scientific Research (**AFOSR**)
-on subsurface imaging.
+nodal homogenization and the thin-layer benchmark below.
 
 ---
 
